@@ -36,6 +36,10 @@ export class OverlayWorld implements GameWorld {
     return this.base.groundHeight(x, z);
   }
 
+  floorBelow(x: number, y: number, z: number): number {
+    return this.base.floorBelow ? this.base.floorBelow(x, y, z) : this.base.groundHeight(x, z);
+  }
+
   distance(p: Vec3): number {
     const io = this.set.io;
     io[0] = this.base.distance(p);

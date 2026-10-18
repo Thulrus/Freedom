@@ -11,6 +11,8 @@ export class CameraRig {
   readonly pilotPos = new THREE.Vector3(0, 1.6, 4);
   /** Ground height under a render-space (x, z), so the chase camera never dips below terrain. */
   ground: (x: number, z: number) => number = () => 0;
+  /** Pull a chase camera in front of anything solid between it and the quad (render coordinates). */
+  occlude: ((quad: THREE.Vector3, cam: THREE.Vector3) => void) | null = null;
   private readonly tilt = new THREE.Quaternion();
   private readonly tmp = new THREE.Vector3();
   private readonly fwd = new THREE.Vector3(0, 0, -1);
@@ -47,6 +49,7 @@ export class CameraRig {
         const maxLag = s.chaseDistance * 0.5;
         if (lag > maxLag) cam.position.lerp(this.target, 1 - maxLag / lag);
         cam.position.y = Math.max(cam.position.y, this.ground(cam.position.x, cam.position.z) + 0.2);
+        this.occlude?.(pos, cam.position);
         cam.lookAt(this.tmp.copy(pos).setY(pos.y + 0.15));
         break;
       }

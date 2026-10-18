@@ -8,6 +8,7 @@ import { gateFrame, type BoxDef } from '../world/boxes';
 import type { GameWorld } from '../world/recipes';
 import { CityWorld, PITCH } from '../world/city';
 import { SandboxWorld } from '../world/sandbox';
+import { VolumeWorld, type Opening } from '../world/volume';
 import type { Checkpoint, Layout, Pylon } from './types';
 
 export const GATE_COLORS = [0xff5a36, 0xffc531, 0x2fd3c6, 0xb46cff];
@@ -144,9 +145,102 @@ function cityRaceLayout(world: CityWorld): Layout {
   return { checkpoints, pylons: [], zone: null, boxes: gateBoxes(world, checkpoints) };
 }
 
-/** Gate race: a loop of 8 gates curving right from straight ahead of the pad (a street circuit in cities). */
+/**
+ * Natural race for volume worlds: a loop through the world's own arches,
+ * windows, tunnels, rings and under its bridges. The rock is the gate; each
+ * checkpoint is a virtual window that fits inside its opening.
+ *
+ * The loop goes around a centre near the pad: the ring around it is cut into
+ * 8 sectors, and each sector contributes the opening that is best lined up
+ * with the direction of travel (the tangent), at a comfortable radius.
+ * Ordered by angle, they close into a circuit by construction. Several
+ * centres and both directions are tried; the best loop wins.
+ */
+function featureRaceLayout(world: VolumeWorld): Layout | null {
+  const P = world.period, sp = world.spawn;
+  const SECTORS = 8;
+  type Cand = { o: Opening; x: number; y: number; z: number };
+  const cands: Cand[] = [];
+  for (const o of world.openings) {
+    for (const sx of [-P, 0, P]) {
+      for (const sz of [-P, 0, P]) {
+        const x = o.x + sx, z = o.z + sz;
+        if (Math.hypot(x - sp.x, z - sp.z) < 320) cands.push({ o, x, y: o.y, z });
+      }
+    }
+  }
+  const fx0 = -Math.sin(world.spawnYaw), fz0 = -Math.cos(world.spawnYaw);
+  let best: { score: number; route: { c: Cand; yaw: number }[] } | null = null;
+  for (const dist of [70, 100, 130]) {
+    for (let k = 0; k < 12; k++) {
+      const turn = (Math.ceil(k / 2) * (k % 2 ? 1 : -1) * Math.PI) / 6;
+      const cs = Math.cos(turn), sn = Math.sin(turn);
+      const cx = sp.x + (fx0 * cs - fz0 * sn) * dist, cz = sp.z + (fx0 * sn + fz0 * cs) * dist;
+      for (const dir of [1, -1]) {
+        const pick: ({ c: Cand; yaw: number; score: number; angle: number } | null)[] = Array(SECTORS).fill(null);
+        for (const c of cands) {
+          const rx = c.x - cx, rz = c.z - cz, r = Math.hypot(rx, rz);
+          if (r < 35 || r > 160) continue;
+          const angle = Math.atan2(rz, rx);
+          // Travel direction around the centre (counter-clockwise for dir = 1, seen from above).
+          const tx = (-rz / r) * dir, tz = (rx / r) * dir;
+          let ox = Math.sin(c.o.yaw), oz = Math.cos(c.o.yaw), yaw = c.o.yaw;
+          if (ox * tx + oz * tz < 0) {
+            ox = -ox;
+            oz = -oz;
+            yaw += Math.PI;
+          }
+          const align = ox * tx + oz * tz;
+          if (align < 0.45) continue;
+          const score = align * 2 - Math.abs(r - 80) / 60 + Math.min(c.o.width, 8) / 16;
+          const sector = Math.floor(((angle / (2 * Math.PI) + 1) % 1) * SECTORS) % SECTORS;
+          if (!pick[sector] || score > pick[sector]!.score) pick[sector] = { c, yaw, score, angle };
+        }
+        const got = pick.filter((p): p is NonNullable<typeof p> => !!p);
+        if (got.length < 5) continue;
+        // In travel order around the centre.
+        got.sort((a, b) => (a.angle - b.angle) * dir);
+        // Legs: short is good, steep climbs are not; a missing sector leaves a long leg.
+        let legs = 0;
+        for (let i = 0; i < got.length; i++) {
+          const a = got[i].c, b = got[(i + 1) % got.length].c;
+          const h = Math.hypot(a.x - b.x, a.z - b.z);
+          legs += Math.max(0, h - 110) / 30 + Math.max(0, Math.abs(a.y - b.y) - 0.5 * h) / 10;
+        }
+        // Start with the one the pilot reaches first: nearest the pad among those ahead of it...
+        let first = -1, firstD = Infinity;
+        got.forEach((g, i) => {
+          const vx = g.c.x - sp.x, vz = g.c.z - sp.z;
+          const ahead = vx * fx0 + vz * fz0;
+          const d = Math.hypot(vx, vz, g.c.y - sp.y);
+          // ...and crossed going away from the pad, not back towards it.
+          const away = Math.sin(g.yaw) * vx + Math.cos(g.yaw) * vz;
+          if (ahead > 0.5 * d && away > 0.3 * d && d < firstD) {
+            firstD = d;
+            first = i;
+          }
+        });
+        const start = first < 0 ? -6 : -Math.max(0, firstD - 70) / 25;
+        const score = got.reduce((s, g) => s + g.score, 0) + got.length * 1.5 - legs + start;
+        if (!best || score > best.score) {
+          const f = Math.max(0, first);
+          best = { score, route: [...got.slice(f), ...got.slice(0, f)] };
+        }
+      }
+    }
+  }
+  if (!best) return null;
+  const checkpoints: Checkpoint[] = best.route.map(({ c, yaw }) => ({ x: c.x, y: c.y, z: c.z, yaw, width: c.o.width, height: c.o.height, style: 'window' }));
+  return { checkpoints, pylons: [], zone: null, boxes: [] };
+}
+
+/** Gate race: a loop of 8 gates curving right from straight ahead of the pad (a street circuit in cities, natural openings in volume worlds). */
 export function raceLayout(world: GameWorld): Layout {
   if (world instanceof CityWorld) return cityRaceLayout(world);
+  if (world instanceof VolumeWorld) {
+    const l = featureRaceLayout(world);
+    if (l) return l;
+  }
   if (world instanceof SandboxWorld) {
     // The sandbox already has a gate loop: fly it from gate 1 (straight ahead) the other way round.
     const gs = world.gates;

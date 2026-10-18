@@ -6,7 +6,7 @@ import * as THREE from 'three';
 import { FixedStepper, hoverThrottle, Quad, QuadState, Quat, Vec3, type SimParams } from './sim';
 import { InputManager } from './input/manager';
 import type { GamepadMapping } from './input/gamepad';
-import { buildWorld, type GameWorld } from './world/recipes';
+import { buildWorld, floorUnder, type GameWorld } from './world/recipes';
 import { SceneView } from './render/scene';
 import { FloatingOrigin } from './render/origin';
 import { DroneModel } from './render/drone';
@@ -119,6 +119,8 @@ export class App {
   private readonly qb = new Quat();
   private readonly markerVec = new THREE.Vector3();
   private readonly markerCam = new THREE.Vector3();
+  private readonly camFrom = new Vec3();
+  private readonly camDir = new Vec3();
   private readonly marker: MarkerInfo = { x: 0, y: 0, behind: false, dist: 0 };
   // Per-frame scratch (no allocation in the loop).
   private readonly qInterp = new Quat();
@@ -146,7 +148,9 @@ export class App {
     this.bests = (loadJson('bests') as Record<string, BestScore> | null) ?? {};
     this.view = new SceneView(canvas, { antialias: settings.graphics.antialias });
     this.view.setWorld(this.world);
-    this.rig.ground = (x, z) => this.world.groundHeight(x + this.origin.x, z + this.origin.z);
+    // Worlds with overhangs (arches, islands) skip the ground clamp: the occlusion ray handles them.
+    this.rig.ground = (x, z) => (this.world.floorBelow ? -Infinity : this.world.groundHeight(x + this.origin.x, z + this.origin.z));
+    this.rig.occlude = (quad, cam) => this.occludeCamera(quad, cam);
     this.drone = new DroneModel(settings.sim.quad);
     this.view.scene.add(this.drone.group, this.drone.shadow);
     this.ghost = new DroneModel(settings.sim.quad, { ghost: true });
@@ -289,7 +293,7 @@ export class App {
     const t1 = performance.now();
     this.view.update(wx, wz, origin, WORLD_BUDGET_MS);
     this.worldMs = performance.now() - t1;
-    const groundY = this.world.groundHeight(wx, wz);
+    const groundY = floorUnder(this.world, wx, wy + 0.05, wz);
     const p = this.renderPos.set(wx - origin.x, wy, wz - origin.z);
     this.rig.pilotPos.set(this.pilot.x - origin.x, this.pilot.y, this.pilot.z - origin.z);
     const q = this.renderQuat.set(qi.x, qi.y, qi.z, qi.w);
@@ -337,6 +341,21 @@ export class App {
       world: this.view.worldStatus,
       origin: this.origin,
     });
+  }
+
+  /** Keep the chase camera on the quad's side of walls, arches and tunnel roofs. */
+  private occludeCamera(quad: THREE.Vector3, cam: THREE.Vector3): void {
+    const w = this.world;
+    if (!w.raycast) return;
+    const from = this.camFrom.set(quad.x + this.origin.x, quad.y, quad.z + this.origin.z);
+    const d = this.camDir.set(cam.x - quad.x, cam.y - quad.y, cam.z - quad.z);
+    const len = d.length();
+    if (len < 0.3) return;
+    d.scale(1 / len);
+    const hit = w.raycast(from, d, len + 0.3);
+    if (!hit) return;
+    const t = Math.max(0.25, hit.distance - 0.3);
+    if (t < len) cam.set(quad.x + d.x * t, quad.y + d.y * t, quad.z + d.z * t);
   }
 
   /** Screen position of a world-space target for the HUD marker. */

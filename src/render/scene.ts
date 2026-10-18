@@ -17,6 +17,7 @@ export class SceneView {
   private readonly skyUniforms: { uZenith: { value: THREE.Color }; uHorizon: { value: THREE.Color }; uSun: { value: THREE.Color } };
   private readonly fogColor = new THREE.Color();
   private view: WorldView | null = null;
+  private readonly hemi = new THREE.HemisphereLight(0xe4eeff, 0x6f7f5c, 3.2);
   private drawDistance = 600;
 
   constructor(canvas: HTMLCanvasElement, opts: { antialias: boolean }) {
@@ -25,7 +26,7 @@ export class SceneView {
     this.scene.fog = new THREE.Fog(this.fogColor, 80, 600);
     this.scene.background = this.fogColor;
 
-    this.scene.add(new THREE.HemisphereLight(0xe4eeff, 0x6f7f5c, 3.2));
+    this.scene.add(this.hemi);
     const sun = new THREE.DirectionalLight(0xfff4e0, 2.6);
     sun.position.copy(SUN_DIR);
     this.scene.add(sun);
@@ -44,6 +45,7 @@ export class SceneView {
     const sky = RECIPES[world.id].sky;
     this.skyUniforms.uZenith.value.setHex(sky.zenith);
     this.skyUniforms.uSun.value.setHex(sky.sun);
+    this.hemi.groundColor.setHex(sky.bounce ?? 0x6f7f5c);
     this.fogColor.setHex(sky.horizon);
     (this.scene.fog as THREE.Fog).color = this.fogColor;
     this.view = createWorldView(world);

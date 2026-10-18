@@ -92,7 +92,7 @@ describe('layouts', () => {
   });
 
   it('every activity builds a layout on every world, with the drill areas clear', () => {
-    for (const w of [hills(3), buildWorld('city', 2), buildWorld('sandbox', 1)]) {
+    for (const w of [hills(3), buildWorld('city', 2), buildWorld('arches', 2), buildWorld('islands', 2), buildWorld('sandbox', 1)]) {
       for (const a of ACTIVITIES) {
         const l = a.layout(w);
         expect(a.start(w, l).phase).toBe('ready');

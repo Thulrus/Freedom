@@ -361,6 +361,123 @@ Probing `distance()` in isolation showed neither problem, because the probe cros
 - On a phone: fps and draw calls downtown on High. It should hold 60 easily.
 - Do the windows shimmer on your screen?
 
-## Next: M7 — Fanciful worlds and polish
+## M7, part 1: fanciful worlds with impossible geography (built; needs real-pilot and real-phone checks)
 
-At least two non-heightfield recipes (e.g. floating islands, tunnel forest) using the `WorldQuery` interface; sound; effects; profiles; wind option. Acceptance: weird worlds work without any changes to the physics module.
+The goal: worlds that are strange and, above all, fun to fly. They are packed with overhangs, tunnels, arches and bridges, kept tight so there are no long empty straights, and flown with **unchanged, real physics**. Both new worlds are **Training** worlds. `sim/` was not touched.
+
+### What exists
+
+- **Volume worlds** (`world/volume.ts`). A world is now a signed distance field rather than a heightfield.
+  - Each *feature* (an arch, a butte, an island, a bridge) is a short CSG program of exact SDF primitives: sphere, ellipsoid, capsule, torus, yaw/pitch-oriented rounded box, round cone and cylinder. They are combined with union, subtraction, intersection and polynomial smooth blends.
+  - Rock gets two octaves of periodic 3D gradient noise (`pnoise.ts`) and optional strata ledges. The noise is faded out away from the surface.
+  - Features sit on an 80 m grid, and a query looks only at the 3×3 cells around it, each feature behind a bounding-sphere early-out.
+  - The field is one function with an inline primitive "interpreter", so the physics path has no calls that pass doubles. That makes it **allocation-free on the first try**.
+  - Physics query cost: **0.39 µs** (Arches) and **0.76 µs** (Sky islands).
+- **Wrap-around space.** Each world is a seamless **640 m tile** that repeats in x and z. Fly off one edge and you're back at the other.
+  - This is impossible geography in its own right, and it keeps features dense: roughly one every 80 m, a few seconds apart at 5" speeds.
+  - It also means the world is meshed once and then cached.
+  - Physics sees a periodic field. The quad's position never jumps, so replays, ghosts and the floating origin all work unchanged.
+  - Construction-time trig uses deterministic `dsin`/`dcos` (only + − × ÷ floor), so a seed builds bit-identical worlds on any engine.
+- **Arches** (`world/arches.ts`): a red-rock desert with dunes flattened around the pad. Each 80 m cell holds one of:
+  - a free-standing arch (a sunken torus with flared feet);
+  - a sandstone fin pierced by 1–3 windows;
+  - a butte with a tunnel through it, often a skylight shaft dropping into the tunnel, and sometimes a roofed slot canyon across it;
+  - twin pillars joined by a natural bridge;
+  - an arcade (a wall with a row of arched doorways);
+  - a hoodoo field with cap rocks.
+
+  A great arch stands 60 m straight ahead of the pad. Walls are colored in strata, with cap rock on top and desert-varnish streaks on steep faces.
+- **Sky islands** (`world/islands.ts`): islands over a cloud sea. The sea is solid and stands in for the ground.
+  - Island heights drift smoothly across the map (34–150 m), so neighbours are often bridgeable.
+  - Shapes vary: shallow plates, deep teardrops, and twin-keeled rocks with stalactites.
+  - About 40% of big islands have a tunnel, and about 30% have a **drop shaft** straight down through the middle.
+  - Neighbours at similar heights are joined by **rope bridges** (exact planks on a sagging curve, with rope handrails and posts; gentle slopes only) or **stone arches**.
+  - Gaps in the archipelago hold giant floating stone rings. Golden rings float in open air, one of them just past the spawn island's edge.
+  - The launch pad is a stone plinth.
+- **Openings.** Each world publishes its fly-through openings: arches, windows, tunnels, slots, rings, and the gaps under bridges.
+  - Every opening is checked against the field: the window and 4 m of approach on each side are clear by 0.8 m, or the opening is shrunk, or dropped.
+  - Arches has about 60 and Sky islands about 110.
+- **Natural gate race** (`game/layouts.ts`, `featureRaceLayout`): a loop through 6–8 of those openings. Each checkpoint is a virtual window sized to fit inside its opening; the rock is the gate.
+  - The loop is chosen around a centre near the pad. The ring is cut into 8 sectors, and each sector contributes the opening best lined up with the direction of travel. Ordered by angle, they close into a circuit by construction.
+  - Several centres and both directions are scored on alignment, leg length and climb. The best loop wins, and it must start with an opening ahead of the pad that is flown going away from it.
+  - (A greedy walk was tried first; it stranded itself in sparse patches.)
+- **Meshing** (`world/volumeMesh.ts`): surface nets at 2, 4 and 8 m cells (LOD 0, 1, 2).
+  - The field is sampled on a grid 4× coarser first. Where all 8 corners of a coarse cell agree in sign by more than the field can change across it (Lipschitz bound 1.7), the whole cell is filled without sampling. Only the shell around the surface is evaluated at full resolution.
+  - Normals come from the global field gradient, so tile seams are invisible.
+  - Coarse LODs extend one cell into their neighbours to cover LOD cracks.
+  - Thin parts (planks, ropes, posts, golden rings, the plinth) are flagged *exact*: they are meshed from their primitives, never sampled.
+- **Rendering** (`render/volumeView.ts`, `render/volumeWorker.ts`).
+  - Meshing runs in a **module Web Worker**, which builds its own copy of the world from (id, seed).
+  - Each of the 25 tiles is meshed at most once per LOD per session. Every visible chunk draws its tile's cached geometry, so repeats of the tile are free.
+  - LOD by ring: 2 m cells in the 3×3 around the drone, 4 m in the next ring, 8 m beyond. A chunk shows whatever LOD is ready, so there are never holes.
+  - World load meshes the 3×3 nearest tiles at 8 m on the main thread, then the worker refines. Without a worker, the same mesher runs on the main thread in budgeted slices.
+  - The cloud sea is a camera-following plane with a world-anchored puff pattern.
+- **Shared improvements:**
+  - **Chase camera occlusion:** a ray from the quad to the camera pulls the camera in front of rock, walls and tunnel roofs. This also fixes the M6 "chase camera clips into alley walls" limitation in the city.
+  - The **shadow** falls on the first surface below the quad (`floorBelow`), not on top of the arch overhead.
+  - The hemisphere light's bounce color is now set per world, so desert walls no longer pick up a green tint from the grass bounce.
+
+### Measured (desktop Node, `npm run bench:volume`)
+
+| | Arches | Sky islands |
+|---|---|---|
+| World build (incl. JIT warm-up) | 48 ms | 90 ms |
+| Features / primitives | 66 / 207 | 177 / 2,564 |
+| Physics query | 0.39 µs | 0.76 µs |
+| Tile at 2 m / 4 m / 8 m | 51 / 13 / 4 ms | 106 / 56 / 12 ms |
+| Triangles per tile at 2 m / 4 m / 8 m | 15.3k / 4.1k / 1.1k | 10.1k / 3.9k / 0.6k |
+
+In headless Chromium (software rendering), the worker streamed everything needed in about **1.2 s** (Arches) and **3.5 s** (Sky islands). Views showed 25–49 draw calls and 95–127k visible triangles (170–270k before frustum culling on High). Budgets are 150 draw calls and 300k triangles. Main-thread world work: < 0.5 ms per frame. Bundle: 204.6 kB gzipped main (+14.6 kB), plus a 20.9 kB gzipped worker.
+
+### Testing
+
+- 134 unit tests (+24). New in `volume.test.ts`, for both worlds:
+  - deterministic by seed, including the openings
+  - **seamless wrap-around**: the same distance at points one, two or many periods apart
+  - a well-behaved field: slope ≤ 1.7 everywhere sampled, and |d| < 3 cm where a ray lands
+  - a clear, flat pad that a dropped quad rests on
+  - ≥ 30 openings of ≥ 3 kinds, each clear in its window and approach
+  - a quad flown through the biggest opening never touches rock
+  - a quad flown at a vertical wall makes contact but never ends up inside the rock
+  - mesh vertices on the field's zero set (mean error < 0.15 cell)
+  - ≥ 97% of triangles wound outward
+  - every tile at 8 m, and the busiest at 2 m, within buffer capacity
+  - the natural race closes, with legs < 260 m, starting ahead of the pad and flown away from it; deterministic
+  - deterministic `dsin`/`dcos` and periodic noise
+- The **allocation test** now flies 125k ticks through each new world: rock, noise, exact parts, wrap-around and race windows. Zero garbage.
+- "Every activity on every world" now includes Arches and Sky islands.
+- `npm run smoke` has an M7 section: load each world, wait for the worker, screenshot the pad and an overview, then start the natural race and teleport through every checkpoint in order. Pass means all of them count and the quad never touches rock.
+
+### Known limitations
+
+- **What you see vs what you hit:** collision is the exact field, while the mesh is a surface-net approximation of it. Within the 2 m LOD around the drone, vertices sit on average < 0.3 m from the true surface, and fine noise detail is smoothed. Thin parts are exact.
+- **The first second after loading** shows 8 m tiles near the pad while the worker builds the 2 m ones.
+- **The repeat can be visible** on High (600 m draw distance) on a clear line of sight: the same arch, 640 m away. Fog mostly hides it.
+- **The other drills** (slalom, figure-8, power loop) still use the generic open-ground layouts. On Sky islands they fit on the large spawn island, but pylons near its edge stand on the cloud sea far below. Drills designed around the features would be better (see next).
+- Skylights and drop shafts aren't race checkpoints yet: checkpoints are vertical windows only.
+- No waterfalls, no desert scrub props, and no sound or effects yet.
+
+### Feedback wanted (M7, part 1)
+
+- **Scale for a 5":**
+  - arches are 7–14 m wide
+  - fin windows 8–13 m
+  - tunnels 8–11 m
+  - slots 5.6–8 m
+  - roughly one feature per 80 m
+
+  Too roomy, too tight, too dense?
+- **Do the natural races flow?** Try a few seeds (T → World → seed). Which checkpoints feel awkward to line up?
+- **Is the wrap-around fun or confusing?**
+- On a phone, read the debug overlay (G): fps, and the `tiles 2 m n/25 … worker` line during the first 10 seconds after loading each world.
+
+## Next: M7, part 2
+
+- More worlds from the spec's list:
+  - giant mushroom or tree forest
+  - inverted mountains
+  - cave and canyon networks
+  - Escher-style structures and portals
+- Feature-aware drills: dive through a skylight, a slalom through hoodoos, a split-S under a bridge.
+- Waterfalls and props.
+- The rest of M7: sound, effects, profiles, and the wind/turbulence option. Acceptance: weird worlds work without any changes to the physics module.

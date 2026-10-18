@@ -7,17 +7,21 @@
  * (low gravity, thermals...) must be category 'playground' and say so.
  */
 import type { Vec3, WorldQuery } from '../sim';
+import { ArchesWorld } from './arches';
 import { CityWorld } from './city';
+import { IslandsWorld } from './islands';
 import { buildSandbox } from './sandbox';
 import { TerrainWorld } from './terrain';
 
-export type WorldId = 'hills' | 'city' | 'sandbox';
+export type WorldId = 'hills' | 'city' | 'arches' | 'islands' | 'sandbox';
 
 /** Colors as 0xRRGGBB (sRGB). */
 export interface SkyPalette {
   zenith: number;
   horizon: number;
   sun: number;
+  /** Light bounced up from the ground (hemisphere light's lower color); defaults to grass. */
+  bounce?: number;
 }
 
 export interface TerrainPalette {
@@ -42,8 +46,15 @@ export interface GameWorld extends WorldQuery {
   readonly spawn: Vec3;
   /** Heading at spawn, radians (0 = facing -Z). */
   readonly spawnYaw: number;
-  /** Ground height under (x, z) for shadows and cameras, m. */
+  /** Ground height under (x, z) for shadows and cameras, m. For worlds with overhangs: the top surface. */
   groundHeight(x: number, z: number): number;
+  /** The first surface below (x, y, z), m: for worlds with overhangs, arches and floating islands. */
+  floorBelow?(x: number, y: number, z: number): number;
+}
+
+/** Height of the surface under a point (the floor beneath an arch, not its top). */
+export function floorUnder(w: GameWorld, x: number, y: number, z: number): number {
+  return w.floorBelow ? w.floorBelow(x, y, z) : w.groundHeight(x, z);
 }
 
 export interface Recipe {
@@ -85,6 +96,22 @@ export const RECIPES: Record<WorldId, Recipe> = {
     blurb: 'Endless streets: downtown towers, skybridges, alleys and parks. Real physics.',
     sky: { zenith: 0x4a77b8, horizon: 0xcdd9e3, sun: 0xfff1c9 },
     build: (seed) => new CityWorld(seed),
+  },
+  arches: {
+    id: 'arches',
+    name: 'Arches',
+    category: 'training',
+    blurb: 'Red-rock canyon packed with arches, windows, tunnels, skylights, slots and hoodoos. Wraps around every 640 m. Real physics.',
+    sky: { zenith: 0x4a80c4, horizon: 0xf0c9a0, sun: 0xfff0d2, bounce: 0xb98a66 },
+    build: (seed) => new ArchesWorld(seed),
+  },
+  islands: {
+    id: 'islands',
+    name: 'Sky islands',
+    category: 'training',
+    blurb: 'Floating islands over a cloud sea: tunnels, drop shafts, rope bridges, stone arches and golden rings. Wraps around every 640 m. Real physics.',
+    sky: { zenith: 0x3b7ad6, horizon: 0xdcebf6, sun: 0xfff6e0, bounce: 0xa7b0c4 },
+    build: (seed) => new IslandsWorld(seed),
   },
   sandbox: {
     id: 'sandbox',

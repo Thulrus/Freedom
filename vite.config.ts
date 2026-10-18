@@ -35,6 +35,8 @@ export default defineConfig({
   plugins: [serviceWorker()],
   // three.js is ~155 kB gzipped; fine for now (see DEVLOG).
   build: { chunkSizeWarningLimit: 700 },
+  // Module workers (the volume-world mesher), so they can share code-split chunks.
+  worker: { format: 'es' },
   test: {
     include: ['src/tests/**/*.test.ts'],
     // Real processes, so the allocation test can use node:inspector.

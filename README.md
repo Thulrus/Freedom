@@ -4,7 +4,7 @@
 
 A browser FPV drone simulator, mobile-first, for practicing real acro flying. It uses procedurally generated worlds. It is static files only, with no backend. The full spec is in [`docs/SPEC.md`](docs/SPEC.md).
 
-**Status: Milestone 6 (cities) is built.** There are three worlds: endless rolling hills, an endless low-poly city, and the sandbox. Every world has the gate race (a street circuit in the city), five training drills, replays and telemetry. M4 has been flown on a real phone; M5 and M6 are waiting for that. M3 still wants the full device checklist ([`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md)), and M2 a check with a real radio. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
+**Status: Milestone 7 has started: the first two fanciful worlds are built.** There are five worlds: endless rolling hills, an endless low-poly city, **Arches** (a red-rock canyon of arches, windows and tunnels), **Sky islands** (floating islands with bridges and rings), and the sandbox. Every world has the gate race (a street circuit in the city, a loop through natural openings in the fanciful worlds), five training drills, replays and telemetry. M4 has been flown on a real phone; M5–M7 are waiting for that. M3 still wants the full device checklist ([`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md)), and M2 a check with a real radio. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
 
 ## Quick start
 
@@ -51,14 +51,14 @@ Keyboard flight is for testing only. Use a radio or gamepad for real practice.
 src/
   sim/       PURE TypeScript physics + flight controller. No DOM, no Three.js.
   input/     Keyboard, Gamepad API (gamepads + radios), stick shaping -> RcChannels
-  world/     Worlds as WorldQuery: recipes, seeded noise, streaming terrain + chunk streamer, M2 sandbox
+  world/     Worlds as WorldQuery: recipes, seeded noise, streaming terrain + chunk streamer, city, volume (SDF) worlds + mesher, M2 sandbox
   render/    Three.js scene, per-world views, floating origin, drone model, FPV/chase/LOS camera rig
   ui/        OSD, tuning panel, debug overlay, controller setup, help
   platform/  Storage, frame stats, dynamic resolution, latency meter, fullscreen/orientation, PWA
   app.ts     Wires the loop: input -> fixed-step sim -> interpolated render
   settings.ts  Persisted app settings (sim params, camera, input, graphics)
   tests/     Headless tests
-scripts/     plots, browser smoke test
+scripts/     plots, browser smoke test, volume-world benchmark
 docs/        Spec and generated plots
 ```
 
@@ -96,7 +96,7 @@ Open the menu with **M** (or ☰ on touch). Each mode is laid out around the lau
 | mode | goal | score |
 |---|---|---|
 | Free flight | No rules | – |
-| Gate race | 3 laps of an 8-gate loop; a missed gate has to be flown back to | total time; stars from average speed; races a ghost of your best lap |
+| Gate race | 3 laps of an 8-gate loop (in Arches and Sky islands: 6–8 natural openings); a missed gate has to be flown back to | total time; stars from average speed; races a ghost of your best lap |
 | Slalom | Six pylons on alternating sides (outline shows the side), start to finish line | time |
 | Figure-8 | Through the middle, round the right pylon, back through the middle, round the left | time |
 | Hover hold | Stay inside a 2 m box for 10 s straight | time taken; feedback on drift |
@@ -115,6 +115,8 @@ Pick a world and seed in **T → World**. The same seed always gives the same wo
 |---|---|---|
 | Rolling hills (default) | Training | Endless seeded terrain: hills, lakes, forests, boulders, ridged mountains with rock and snow. |
 | Low-poly city | Training | Endless seeded street grid: downtown towers with setbacks, spires and skybridges, mid-rise blocks, residential streets, parks, and an open plaza around the pad. |
+| Arches | Training | Red-rock desert packed with free-standing arches, fins pierced by windows, buttes with tunnels, skylight shafts and roofed slot canyons, natural bridges, arcades and hoodoos. Wraps around every 640 m. |
+| Sky islands | Training | Floating islands over a cloud sea: tunnels, drop shafts through the middle, rope bridges and stone arches between islands, giant stone rings, golden rings. Wraps around every 640 m. |
 | Sandbox | Training | The M2 test field: flat ground, pillars, buildings, an 8-gate loop. |
 
 Training worlds always use real Earth physics. Worlds that change physics will be labelled "Playground".
@@ -130,8 +132,16 @@ How the terrain works (`src/world/`):
   - Alleys between buildings are at least 4 m wide.
   - Each block is one deterministic function of (seed, block), used by both collision (exact box distances) and rendering.
   - Each 128 m chunk is one merged mesh and one draw call. Windows are drawn by a shader from facade coordinates, so they add no geometry.
+- **Volume worlds** (`volume.ts`, `arches.ts`, `islands.ts`): fanciful geography (overhangs, arches, tunnels, floating islands) can't be a heightfield, so these worlds are signed distance fields.
+  - Each feature (an arch, a butte, an island, a bridge) is a short CSG program of exact SDF primitives: sphere, ellipsoid, capsule, torus, oriented box, round cone and cylinder. They are combined with unions, subtractions and smooth blends, plus a little periodic rock noise and strata ledges.
+  - Features sit on an 80 m grid, so a query only evaluates the 3×3 cells around it (≈0.4–0.9 µs per query).
+  - **The world wraps around**: it is a seamless 640 m tile, so features are never far apart and there are no long empty straights. Physics just sees a periodic field; positions never jump.
+  - Collision reads the field directly. Rendering meshes the same field with **surface nets** (`volumeMesh.ts`) at 2, 4 and 8 m cells, so what you see is what you hit to within the mesh resolution. Thin parts (planks, ropes, rings) are "exact": they are meshed from their primitives, not sampled.
+  - Meshing skips most of the volume using the field's Lipschitz bound. A 2 m tile takes ≈50–100 ms on a desktop. It runs in a **Web Worker** (`render/volumeWorker.ts`), and each tile is meshed once per session and then reused for every repeat of the tile. Without a worker, it runs on the main thread in small slices.
+  - Each world publishes its **openings** (arches, windows, tunnels, slots, rings, gaps under bridges), each checked to be clear. The gate race is a loop through them.
+  - The chase camera is pulled in front of anything between it and the quad (a raycast), so it stays inside tunnels and under arches. The drone's shadow falls on the first surface below it.
 - **Floating origin** (`render/origin.ts`): everything is drawn relative to an origin that jumps (in whole chunks) whenever the camera is more than 1 km from it, so float32 GPU precision never causes jitter. Physics stays in double-precision world coordinates.
-- **Zero allocation in physics**: the terrain query follows the sim's rules (doubles cross calls through typed arrays), and the allocation test covers 125k ticks of skimming the ground through a forest.
+- **Zero allocation in physics**: the terrain, city and volume queries follow the sim's rules (doubles cross calls through typed arrays). The allocation test flies 125k ticks through each world (a forest, city streets, arches, sky islands) and finds no garbage.
 
 ## Tuning parameters
 

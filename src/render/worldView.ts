@@ -4,10 +4,12 @@ import type { GameWorld } from '../world/recipes';
 import { CityWorld } from '../world/city';
 import { SandboxWorld } from '../world/sandbox';
 import { TerrainWorld } from '../world/terrain';
+import { VolumeWorld } from '../world/volume';
 import type { FloatingOrigin } from './origin';
 import { CityView } from './cityView';
 import { SandboxView } from './sandboxView';
 import { TerrainView } from './terrainView';
+import { VolumeView } from './volumeView';
 
 export interface WorldView {
   readonly object: THREE.Object3D;
@@ -29,5 +31,6 @@ export function createWorldView(world: GameWorld): WorldView {
   if (world instanceof TerrainWorld) return new TerrainView(world);
   if (world instanceof CityWorld) return new CityView(world);
   if (world instanceof SandboxWorld) return new SandboxView(world);
+  if (world instanceof VolumeWorld) return new VolumeView(world);
   throw new Error(`No renderer for world "${world.id}"`);
 }

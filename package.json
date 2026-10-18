@@ -14,7 +14,8 @@
     "plots": "vite-node scripts/plot-responses.ts",
     "smoke": "vite build && vite-node scripts/smoke.ts",
     "smoke:mobile": "vite build && vite-node scripts/smoke-mobile.ts",
-    "icons": "vite-node scripts/make-icons.ts"
+    "icons": "vite-node scripts/make-icons.ts",
+    "bench:volume": "vite-node scripts/bench-volume.ts"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

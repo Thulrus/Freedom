@@ -114,4 +114,21 @@ describe('hot loop allocation', () => {
     expect(r.contacts).toBeGreaterThan(500);
     expect(r.perTick, `allocations in sim/ + world/:\n${r.report}`).toBeLessThan(0.5);
   });
+
+  it.each(['arches', 'islands'])('flying through %s (rock, noise, wrap-around, exact parts, race) allocates nothing', async (id) => {
+    const base = buildWorld(id, 3);
+    const world = new OverlayWorld(base, raceLayout(base).boxes);
+    const sp = base.spawn;
+    // Low and fast, weaving and bouncing off rock (crashes are off), crossing many feature cells.
+    const r = await profileTicks(world, [sp.x, sp.y + 1.5, sp.z], (r, t) => {
+      r.arm = true;
+      r.mode = 'angle';
+      r.throttle = 0.34 + 0.1 * Math.sin(t * 0.0021);
+      r.pitch = 0.65;
+      r.roll = 0.5 * Math.sin(t * 0.0007);
+      r.yaw = 0.2 * Math.sin(t * 0.0003);
+    }, (p) => (p.quad.collision.disarmOnCrash = false));
+    expect(r.contacts).toBeGreaterThan(200);
+    expect(r.perTick, `allocations in sim/ + world/:\n${r.report}`).toBeLessThan(0.5);
+  });
 });

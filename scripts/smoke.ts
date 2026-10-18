@@ -3,8 +3,8 @@
  * Usage: npm run smoke   (builds, serves dist/ with vite preview, writes screenshots to smoke-out/)
  * Flies with the keyboard, then with a simulated gamepad, runs the radio
  * calibration wizard against scrambled axes, teleports 50 km out over the
- * streaming terrain (floating origin), switches worlds, and fails on any
- * console error.
+ * streaming terrain (floating origin), switches worlds, flies races in the
+ * city and the volume worlds, and fails on any console error.
  */
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -253,6 +253,57 @@ await page.screenshot({ path: `${OUT}/20-city-race.png` });
 await page.keyboard.press('KeyC');
 await page.keyboard.press('KeyC');
 console.log('m6', JSON.stringify({ cityStatus }));
+
+// M7: volume worlds (arches, sky islands). Tiles mesh in a worker; the natural race goes through the
+// world's own openings: teleport through each in order for one lap, and check the run counts them.
+const m7: Record<string, { status: string; passed: number; total: number; contact: boolean }> = {};
+for (const [i, id] of ['arches', 'islands'].entries()) {
+  await page.keyboard.press('KeyM');
+  await page.click('.mode-card:has-text("Free flight")');
+  await F(`f.settings.world = { recipe: '${id}', seed: 1 }; f.loadWorld(); f.settings.camera.mode = 'fpv';`);
+  await page.waitForFunction(() => /· 0 queued/.test((window as any).freedom.view.worldStatus), null, { timeout: 60000 });
+  await page.screenshot({ path: `${OUT}/${21 + i * 3}-${id}-pad.png` });
+  const sp = await page.evaluate(() => { const s = (window as any).freedom.world.spawn; return [s.x, s.y, s.z]; });
+  await pose(sp[0] + 30, sp[1] + 25, sp[2] + 50, 0.4);
+  await page.waitForFunction(() => /· 0 queued/.test((window as any).freedom.view.worldStatus), null, { timeout: 60000 });
+  await page.screenshot({ path: `${OUT}/${22 + i * 3}-${id}-above.png` });
+  await page.keyboard.press('KeyM');
+  await page.click('.mode-card:has-text("Gate race")');
+  await page.click('.modal-box .btn.primary');
+  await page.keyboard.press('Space'); // arm
+  const lap = await page.evaluate(
+    () =>
+      new Promise<{ passed: number; total: number; contact: boolean }>((res) => {
+        const f = (window as any).freedom;
+        const cps = f.act.layout.checkpoints;
+        let k = 0, step = 0, contact = false;
+        const tick = () => {
+          const c = cps[k], s = f.quad.state;
+          const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw), d = step < 2 ? -2 : 2;
+          s.pos.set(c.x + fx * d, c.y, c.z + fz * d);
+          s.vel.set(fx * 15, 0, fz * 15);
+          f.stepper.sync();
+          contact ||= s.contact;
+          if (++step === 4) {
+            step = 0;
+            k++;
+          }
+          if (k < cps.length) requestAnimationFrame(tick);
+          else setTimeout(() => res({ passed: f.act.run.idx, total: cps.length, contact }), 100);
+        };
+        tick();
+      }),
+  );
+  await page.keyboard.press('KeyC');
+  await page.waitForTimeout(300);
+  await page.screenshot({ path: `${OUT}/${23 + i * 3}-${id}-race.png` });
+  await page.keyboard.press('KeyC');
+  await page.keyboard.press('KeyC');
+  m7[id] = { status: await page.evaluate(() => (window as any).freedom.view.worldStatus), ...lap };
+}
+console.log('m7', JSON.stringify(m7));
+// Every opening counted, in order, without touching rock.
+const m7Ok = Object.values(m7).every((r) => r.passed === r.total && r.total >= 6 && !r.contact && r.status.includes('worker'));
 const m5Ok = race.phase === 'finished' && race.laps.length === 3 && race.modal && replayOn && backToResults && !!replay && !replay.diverged && replay.duration > 1;
 const fps = await page.evaluate(() => new Promise<number>((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else res(n); }; requestAnimationFrame(f); }));
 console.log(JSON.stringify({ armed, climbed, padArmed, padClimb, source, fps, errors }, null, 1));
@@ -260,5 +311,5 @@ await browser.close();
 await server?.close();
 // Origin snaps to the 128 m chunk grid nearest the drone.
 const farOk = far.origin[0] === 40064 && far.origin[1] === -29952 && sandbox === 'sandbox';
-if (errors.length || !wizardOk || !farOk || !m5Ok || !armed.armed || climbed.y - y0 < 1 || !padArmed.armed || padClimb.y - y0 < 1 || source !== 'gamepad') process.exit(1);
+if (errors.length || !wizardOk || !farOk || !m5Ok || !m7Ok || !armed.armed || climbed.y - y0 < 1 || !padArmed.armed || padClimb.y - y0 < 1 || source !== 'gamepad') process.exit(1);
 console.log('SMOKE OK');
