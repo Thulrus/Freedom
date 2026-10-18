@@ -99,4 +99,19 @@ describe('hot loop allocation', () => {
     expect(r.contacts).toBeGreaterThan(1000);
     expect(r.perTick, `allocations in sim/ + world/ + game/:\n${r.report}`).toBeLessThan(0.5);
   });
+
+  it('flying through the city (block crossings, walls, skybridges) allocates nothing', async () => {
+    const world = buildWorld('city', 2);
+    // Fast and low down a street, weaving into buildings (crashes are off).
+    const r = await profileTicks(world, [0, 2, -40], (r, t) => {
+      r.arm = true;
+      r.mode = 'angle';
+      r.throttle = 0.36 + 0.08 * Math.sin(t * 0.003);
+      r.pitch = 0.7;
+      r.roll = 0.5 * Math.sin(t * 0.0009);
+      r.yaw = 0.15 * Math.sin(t * 0.0005);
+    }, (p) => (p.quad.collision.disarmOnCrash = false));
+    expect(r.contacts).toBeGreaterThan(500);
+    expect(r.perTick, `allocations in sim/ + world/:\n${r.report}`).toBeLessThan(0.5);
+  });
 });

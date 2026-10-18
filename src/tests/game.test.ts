@@ -79,8 +79,20 @@ describe('layouts', () => {
     expect(Math.cos(l.checkpoints[0].yaw)).toBeCloseTo(-1, 9); // flown towards -Z
   });
 
-  it('every activity builds a layout on both worlds', () => {
-    for (const w of [hills(3), buildWorld('sandbox', 1)]) {
+  it('city race is a street circuit: every gate opening and approach is clear of buildings', () => {
+    for (const seed of [1, 2, 3]) {
+      const w = buildWorld('city', seed);
+      const l = raceLayout(w);
+      expect(l.checkpoints.length).toBe(9);
+      for (const c of l.checkpoints) {
+        const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw);
+        for (const k of [-8, -4, 0, 4, 8]) expect(w.distance(new Vec3(c.x + fx * k, c.y, c.z + fz * k)), `seed ${seed}`).toBeGreaterThan(1); // the road itself is ~1.9 m below gate 1
+      }
+    }
+  });
+
+  it('every activity builds a layout on every world, with the drill areas clear', () => {
+    for (const w of [hills(3), buildWorld('city', 2), buildWorld('sandbox', 1)]) {
       for (const a of ACTIVITIES) {
         const l = a.layout(w);
         expect(a.start(w, l).phase).toBe('ready');

@@ -14,7 +14,7 @@
  * typed arrays (see DEVLOG, "Zero-allocation lessons").
  */
 import { Vec3, type Hit } from '../sim';
-import { CHUNK_SIZE, MAX_PROPS, PROP_STRIDE, type ChunkGenerator, type ChunkJob } from './chunks';
+import { CHUNK_SIZE, ChunkMesh, MAX_PROPS, PROP_STRIDE, type ChunkGenerator, type ChunkJob } from './chunks';
 import { Noise } from './noise';
 import type { GameWorld, TerrainPalette } from './recipes';
 
@@ -55,8 +55,14 @@ const SPHERE_INSET = 0.95;
 const ROCK_INSET = 0.85;
 /** Tallest prop, m (pine at b = 13). */
 const MAX_PROP_HEIGHT = 14;
-/** Props outside the 3x3 cells around a point are at least this far away, m. */
-const PROP_BOUND = 5;
+/**
+ * The prop cache holds the 3x3 cells around a centre cell and is kept while
+ * the query point stays within this margin of that cell, so samples
+ * straddling a cell edge don't rebuild it on every call.
+ */
+const CACHE_MARGIN = 2;
+/** Props outside the cached cells are at least this far away, m (centres ≥ 7 m, radius ≤ 3.5 m). */
+const PROP_BOUND = 3;
 
 /** Spawn pad: flattened radius, blend radius, and prop-free radius, m. */
 const SPAWN_FLAT = 16;
@@ -368,8 +374,15 @@ export class TerrainWorld implements GameWorld, ChunkGenerator {
     // Distance to the plane of the triangle under p.
     let best = (py - h) / Math.sqrt(1 + gx * gx + gz * gz);
 
-    const cix = Math.floor(px / PROP_CELL), ciz = Math.floor(pz / PROP_CELL);
-    if (!this.cacheValid || cix !== this.cacheCx || ciz !== this.cacheCz) this.fillCache(cix, ciz);
+    const cx0 = this.cacheCx * PROP_CELL, cz0 = this.cacheCz * PROP_CELL;
+    if (
+      !this.cacheValid ||
+      px < cx0 - CACHE_MARGIN ||
+      px > cx0 + PROP_CELL + CACHE_MARGIN ||
+      pz < cz0 - CACHE_MARGIN ||
+      pz > cz0 + PROP_CELL + CACHE_MARGIN
+    )
+      this.fillCache(Math.floor(px / PROP_CELL), Math.floor(pz / PROP_CELL));
     const c = this.cache;
     const S = PROP_SHAPE;
     for (let i = 0; i < this.cacheN; i++) {
@@ -421,6 +434,10 @@ export class TerrainWorld implements GameWorld, ChunkGenerator {
   }
 
   // ------------------------------------------------------- chunk generation
+
+  createMesh(lod: number): ChunkMesh {
+    return new ChunkMesh(lod);
+  }
 
   /**
    * One slice of chunk work. Phase 0 samples one row of the height grid per

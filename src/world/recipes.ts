@@ -7,10 +7,11 @@
  * (low gravity, thermals...) must be category 'playground' and say so.
  */
 import type { Vec3, WorldQuery } from '../sim';
+import { CityWorld } from './city';
 import { buildSandbox } from './sandbox';
 import { TerrainWorld } from './terrain';
 
-export type WorldId = 'hills' | 'sandbox';
+export type WorldId = 'hills' | 'city' | 'sandbox';
 
 /** Colors as 0xRRGGBB (sRGB). */
 export interface SkyPalette {
@@ -76,6 +77,14 @@ export const RECIPES: Record<WorldId, Recipe> = {
     blurb: 'Endless hills, lakes, forests and mountains. Real physics.',
     sky: { zenith: 0x3d6fb6, horizon: 0xbfd6e6, sun: 0xfff1c9 },
     build: (seed) => new TerrainWorld(seed, HILLS_TERRAIN),
+  },
+  city: {
+    id: 'city',
+    name: 'Low-poly city',
+    category: 'training',
+    blurb: 'Endless streets: downtown towers, skybridges, alleys and parks. Real physics.',
+    sky: { zenith: 0x4a77b8, horizon: 0xcdd9e3, sun: 0xfff1c9 },
+    build: (seed) => new CityWorld(seed),
   },
   sandbox: {
     id: 'sandbox',

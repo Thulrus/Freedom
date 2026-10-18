@@ -1,9 +1,11 @@
 /** Rendering side of a world recipe. One implementation per kind of world. */
 import type * as THREE from 'three';
 import type { GameWorld } from '../world/recipes';
+import { CityWorld } from '../world/city';
 import { SandboxWorld } from '../world/sandbox';
 import { TerrainWorld } from '../world/terrain';
 import type { FloatingOrigin } from './origin';
+import { CityView } from './cityView';
 import { SandboxView } from './sandboxView';
 import { TerrainView } from './terrainView';
 
@@ -25,6 +27,7 @@ export interface WorldView {
 
 export function createWorldView(world: GameWorld): WorldView {
   if (world instanceof TerrainWorld) return new TerrainView(world);
+  if (world instanceof CityWorld) return new CityView(world);
   if (world instanceof SandboxWorld) return new SandboxView(world);
   throw new Error(`No renderer for world "${world.id}"`);
 }

@@ -6,6 +6,7 @@
 import { Rng, Vec3 } from '../sim';
 import { gateFrame, type BoxDef } from '../world/boxes';
 import type { GameWorld } from '../world/recipes';
+import { CityWorld, PITCH } from '../world/city';
 import { SandboxWorld } from '../world/sandbox';
 import type { Checkpoint, Layout, Pylon } from './types';
 
@@ -111,8 +112,41 @@ function gateClear(world: GameWorld, x: number, z: number, yaw: number, bottom: 
   return true;
 }
 
-/** Gate race: a loop of 8 gates curving right from straight ahead of the pad. */
+/**
+ * City race: a street circuit around a 4 × 2 block rectangle, starting
+ * straight up the street from the pad and turning right at each corner.
+ * Gates sit mid-block (streets are always open; skybridges only cross alleys).
+ */
+function cityRaceLayout(world: CityWorld): Layout {
+  const rng = new Rng(world.seed * 104729 + 7);
+  const P = PITCH;
+  // [x, z, travel dx, travel dz]
+  const route: [number, number, number, number][] = [
+    [0, -P / 2, 0, -1],
+    [0, -1.5 * P, 0, -1],
+    [0, -2.5 * P, 0, -1],
+    [0, -3.5 * P, 0, -1],
+    [P / 2, -4 * P, 1, 0],
+    [1.5 * P, -4 * P, 1, 0],
+    [2 * P, -2.5 * P, 0, 1],
+    [2 * P, -1 * P, 0, 1],
+    [1.5 * P, 0, -1, 0],
+  ];
+  const w = 2.0, h = 1.8;
+  const checkpoints: Checkpoint[] = route.map(([x, z, dx, dz], k) => {
+    const high = k > 0 && rng.next() < 0.25;
+    const bottom = k === 0 ? 1 : high ? 6 + rng.next() * 8 : 0.8 + rng.next() * 1.6;
+    // Shift sideways within the road (±3 m) so the line isn't trivial.
+    const side = k === 0 ? 0 : (rng.next() * 2 - 1) * 3;
+    const gx = x + dz * side, gz = z - dx * side;
+    return { x: gx, y: world.groundHeight(gx, gz) + bottom + h / 2, z: gz, yaw: Math.atan2(dx, dz), width: w, height: h, style: 'gate' };
+  });
+  return { checkpoints, pylons: [], zone: null, boxes: gateBoxes(world, checkpoints) };
+}
+
+/** Gate race: a loop of 8 gates curving right from straight ahead of the pad (a street circuit in cities). */
 export function raceLayout(world: GameWorld): Layout {
+  if (world instanceof CityWorld) return cityRaceLayout(world);
   if (world instanceof SandboxWorld) {
     // The sandbox already has a gate loop: fly it from gate 1 (straight ahead) the other way round.
     const gs = world.gates;

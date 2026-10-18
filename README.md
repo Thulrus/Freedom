@@ -4,7 +4,7 @@
 
 A browser FPV drone simulator, mobile-first, for practicing real acro flying. It uses procedurally generated worlds. It is static files only, with no backend. The full spec is in [`docs/SPEC.md`](docs/SPEC.md).
 
-**Status: Milestone 5 (game modes, first pass) is built.** Fly free, race a procedural gate course against your best-lap ghost, or practise five training drills, each with a score, stars and feedback. Every flight can be replayed with telemetry graphs. M4 (streaming terrain) has been flown on a real phone. M3 still wants the full device checklist ([`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md)), and M2 a check with a real radio. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
+**Status: Milestone 6 (cities) is built.** There are three worlds: endless rolling hills, an endless low-poly city, and the sandbox. Every world has the gate race (a street circuit in the city), five training drills, replays and telemetry. M4 has been flown on a real phone; M5 and M6 are waiting for that. M3 still wants the full device checklist ([`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md)), and M2 a check with a real radio. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
 
 ## Quick start
 
@@ -114,6 +114,7 @@ Pick a world and seed in **T → World**. The same seed always gives the same wo
 | world | category | what it is |
 |---|---|---|
 | Rolling hills (default) | Training | Endless seeded terrain: hills, lakes, forests, boulders, ridged mountains with rock and snow. |
+| Low-poly city | Training | Endless seeded street grid: downtown towers with setbacks, spires and skybridges, mid-rise blocks, residential streets, parks, and an open plaza around the pad. |
 | Sandbox | Training | The M2 test field: flat ground, pillars, buildings, an 8-gate loop. |
 
 Training worlds always use real Earth physics. Worlds that change physics will be labelled "Playground".
@@ -123,6 +124,12 @@ How the terrain works (`src/world/`):
 - **Height function** (`terrain.ts`): three layers of seeded gradient-noise fBm (`noise.ts`): continents/lakes, rolling hills, and ridged mountains masked to the high ground. Lakes are flat, solid water at y = 0. The launch pad at the origin is flattened and kept clear of trees.
 - **Collision is the mesh.** The collision surface is the triangulated 2 m height grid, with the same vertices and the same triangle split as the finest (LOD 0) mesh, which always covers the chunks around the drone. Trees (cone or sphere crown on a trunk) and boulders are placed by one deterministic function per 8 m cell, shared by rendering and collision.
 - **Streaming** (`chunks.ts`): 128 m chunks in rings around the drone: LOD 0 (2 m grid) for the 3×3 chunks nearest, then 4 m, 8 m and 16 m out to the draw distance, with skirts to hide LOD cracks. Chunks are built in small slices (one row per slice, each well under 0.2 ms on a desktop) within a **2 ms per-frame budget**. Mesh buffers and chunk records are pooled, so memory stays flat no matter how far you fly.
+- **City** (`city.ts`):
+  - Streets run on a 64 m grid (12 m roads, 3 m sidewalks on a 15 cm curb).
+  - Districts come from noise: downtown towers (30–210 m) with setbacks, spires and skybridges over alleys; mid-rise blocks; residential houses; parks.
+  - Alleys between buildings are at least 4 m wide.
+  - Each block is one deterministic function of (seed, block), used by both collision (exact box distances) and rendering.
+  - Each 128 m chunk is one merged mesh and one draw call. Windows are drawn by a shader from facade coordinates, so they add no geometry.
 - **Floating origin** (`render/origin.ts`): everything is drawn relative to an origin that jumps (in whole chunks) whenever the camera is more than 1 km from it, so float32 GPU precision never causes jitter. Physics stays in double-precision world coordinates.
 - **Zero allocation in physics**: the terrain query follows the sim's rules (doubles cross calls through typed arrays), and the allocation test covers 125k ticks of skimming the ground through a forest.
 

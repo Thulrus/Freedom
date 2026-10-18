@@ -23,8 +23,15 @@ export const MAX_PROPS = (CHUNK_SIZE / 8) * (CHUNK_SIZE / 8);
 /** Floats per prop: kind, local x, base y, local z, size a, size b, yaw, tint. */
 export const PROP_STRIDE = 8;
 
-/** Vertex + color buffers for one chunk at one LOD (pooled, reused). */
-export class ChunkMesh {
+/** Whatever a generator builds for one chunk at one LOD (pooled and reused). */
+export interface ChunkBuffer {
+  readonly lod: number;
+  /** Renderer-owned object for this buffer (e.g. a THREE.Mesh), created once. */
+  handle: unknown;
+}
+
+/** Heightfield vertex + color buffers for one chunk at one LOD. */
+export class ChunkMesh implements ChunkBuffer {
   readonly segs: number;
   /** Grid vertices plus one skirt vertex per edge vertex (4 edges). */
   readonly vertexCount: number;
@@ -55,7 +62,7 @@ export class ChunkMesh {
   }
 }
 
-export class Chunk {
+export class Chunk<M extends ChunkBuffer = ChunkMesh> {
   cx = 0;
   cz = 0;
   key = 0;
@@ -64,33 +71,37 @@ export class Chunk {
   /** LOD this chunk should show. */
   want = 0;
   /** Mesh on screen (null until the first build finishes). */
-  mesh: ChunkMesh | null = null;
-  job: ChunkJob | null = null;
+  mesh: M | null = null;
+  job: ChunkJob<M> | null = null;
   /** Props (trees, rocks), PROP_STRIDE floats each, positions local to the chunk corner. */
   readonly props = new Float32Array(MAX_PROPS * PROP_STRIDE);
   propCount = 0;
   propsReady = false;
 }
 
-export class ChunkJob {
-  chunk!: Chunk;
-  mesh!: ChunkMesh;
+export class ChunkJob<M extends ChunkBuffer = ChunkMesh> {
+  chunk!: Chunk<M>;
+  mesh!: M;
   /** Generator-defined progress counters. */
   phase = 0;
   row = 0;
 }
 
 /** World-specific generation, done one bounded slice at a time. */
-export interface ChunkGenerator {
+export interface ChunkGenerator<M extends ChunkBuffer = ChunkMesh> {
   /** Advance the job by one small slice of work. Returns true when the job is finished. */
-  step(job: ChunkJob): boolean;
+  step(job: ChunkJob<M>): boolean;
+  /** A new (empty) buffer for this LOD; the streamer pools them. */
+  createMesh(lod: number): M;
+  /** LOD for a ring (Chebyshev chunk distance); defaults to the heightfield rings. */
+  lodForRing?(ring: number): number;
 }
 
-export interface ChunkListener {
+export interface ChunkListener<M extends ChunkBuffer = ChunkMesh> {
   /** A freshly built mesh should now be drawn for this chunk. */
-  show(chunk: Chunk, mesh: ChunkMesh): void;
+  show(chunk: Chunk<M>, mesh: M): void;
   /** This mesh is no longer drawn (replaced by another LOD, or the chunk left range). */
-  hide(chunk: Chunk, mesh: ChunkMesh): void;
+  hide(chunk: Chunk<M>, mesh: M): void;
 }
 
 const KEY_OFFSET = 1 << 20;
@@ -101,8 +112,8 @@ export function lodForRing(ring: number): number {
   return LOD_RING.length;
 }
 
-export class ChunkStreamer {
-  readonly active = new Map<number, Chunk>();
+export class ChunkStreamer<M extends ChunkBuffer = ChunkMesh> {
+  readonly active = new Map<number, Chunk<M>>();
   /** Set whenever the set of chunks with props (or their rings) changed. Cleared by the renderer. */
   propsDirty = true;
   /** Focus chunk (rings are centered on it). */
@@ -115,10 +126,10 @@ export class ChunkStreamer {
   /** Jobs completed since creation. */
   builds = 0;
 
-  private readonly jobs: ChunkJob[] = [];
-  private readonly meshPool: ChunkMesh[][] = LOD_SEGS.map(() => []);
-  private readonly chunkPool: Chunk[] = [];
-  private readonly jobPool: ChunkJob[] = [];
+  private readonly jobs: ChunkJob<M>[] = [];
+  private readonly meshPool: M[][] = LOD_SEGS.map(() => []);
+  private readonly chunkPool: Chunk<M>[] = [];
+  private readonly jobPool: ChunkJob<M>[] = [];
   /** Totals ever created (for the "no memory growth" test and the debug overlay). */
   readonly created = { meshes: [0, 0, 0, 0], chunks: 0, jobs: 0 };
   private drawDistance = 600;
@@ -128,8 +139,8 @@ export class ChunkStreamer {
   private focusZ = 0;
 
   constructor(
-    private readonly gen: ChunkGenerator,
-    private readonly listener: ChunkListener,
+    private readonly gen: ChunkGenerator<M>,
+    private readonly listener: ChunkListener<M>,
     private readonly clock: () => number = () => performance.now(),
   ) {}
 
@@ -225,7 +236,7 @@ export class ChunkStreamer {
         const key = chunkKey(cx, cz);
         let c = this.active.get(key);
         if (!c) {
-          c = this.chunkPool.pop() ?? (this.created.chunks++, new Chunk());
+          c = this.chunkPool.pop() ?? (this.created.chunks++, new Chunk<M>());
           c.cx = cx;
           c.cz = cz;
           c.key = key;
@@ -237,7 +248,7 @@ export class ChunkStreamer {
         }
         if (c.ring !== ring) this.propsDirty = true;
         c.ring = ring;
-        c.want = lodForRing(ring);
+        c.want = this.gen.lodForRing ? this.gen.lodForRing(ring) : lodForRing(ring);
         const shown = c.mesh ? c.mesh.lod : -1;
         if (c.job && c.job.mesh.lod !== c.want) this.cancel(c);
         if (!c.job && shown !== c.want) this.enqueue(c, c.want);
@@ -247,17 +258,17 @@ export class ChunkStreamer {
     this.jobs.sort((a, b) => (a.chunk.mesh ? 1 : 0) - (b.chunk.mesh ? 1 : 0) || a.chunk.ring - b.chunk.ring);
   }
 
-  private enqueue(c: Chunk, lod: number): void {
-    const job = this.jobPool.pop() ?? (this.created.jobs++, new ChunkJob());
+  private enqueue(c: Chunk<M>, lod: number): void {
+    const job = this.jobPool.pop() ?? (this.created.jobs++, new ChunkJob<M>());
     job.chunk = c;
-    job.mesh = this.meshPool[lod].pop() ?? (this.created.meshes[lod]++, new ChunkMesh(lod));
+    job.mesh = this.meshPool[lod].pop() ?? (this.created.meshes[lod]++, this.gen.createMesh(lod));
     job.phase = 0;
     job.row = 0;
     c.job = job;
     this.jobs.push(job);
   }
 
-  private cancel(c: Chunk): void {
+  private cancel(c: Chunk<M>): void {
     const job = c.job!;
     this.jobs.splice(this.jobs.indexOf(job), 1);
     this.meshPool[job.mesh.lod].push(job.mesh);
@@ -265,7 +276,7 @@ export class ChunkStreamer {
     c.job = null;
   }
 
-  private finish(job: ChunkJob): void {
+  private finish(job: ChunkJob<M>): void {
     const c = job.chunk;
     const old = c.mesh;
     c.mesh = job.mesh;
@@ -280,7 +291,7 @@ export class ChunkStreamer {
     if (!old) this.propsDirty = true;
   }
 
-  private remove(c: Chunk): void {
+  private remove(c: Chunk<M>): void {
     if (c.job) this.cancel(c);
     if (c.mesh) {
       this.listener.hide(c, c.mesh);

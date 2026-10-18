@@ -224,6 +224,35 @@ const replay = await page.evaluate(() => { const r = (window as any).freedom.rep
 await page.screenshot({ path: `${OUT}/16-replay.png` });
 await page.keyboard.press('Escape');
 console.log('m5', JSON.stringify({ race, replayOn, backToResults, replay }));
+
+// M6: the city. Views from the plaza, from above, and low down a street; then the street-circuit race.
+const pose = (x: number, y: number, z: number, yaw: number) =>
+  page.evaluate(([x, y, z, yaw]) => {
+    const f = (window as any).freedom;
+    f.quad.reset(x, y, z, yaw);
+    f.stepper.sync();
+    f.origin.update(x, z);
+    f.view.prime(x, z, f.origin);
+  }, [x, y, z, yaw]);
+await F(`f.settings.world = { recipe: 'city', seed: 1 }; f.loadWorld(); f.settings.camera.mode = 'fpv';`);
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${OUT}/17-city-pad.png` });
+await pose(0, 70, 30, 0);
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${OUT}/18-city-above.png` });
+await pose(64 * 3, 6, -64 * 2 - 20, -Math.PI / 2);
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${OUT}/19-city-street.png` });
+const cityStatus = await page.evaluate(() => (window as any).freedom.view.worldStatus);
+await page.keyboard.press('KeyM');
+await page.click('.mode-card:has-text("Gate race")');
+await page.click('.modal-box .btn.primary');
+await page.keyboard.press('KeyC');
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${OUT}/20-city-race.png` });
+await page.keyboard.press('KeyC');
+await page.keyboard.press('KeyC');
+console.log('m6', JSON.stringify({ cityStatus }));
 const m5Ok = race.phase === 'finished' && race.laps.length === 3 && race.modal && replayOn && backToResults && !!replay && !replay.diverged && replay.duration > 1;
 const fps = await page.evaluate(() => new Promise<number>((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else res(n); }; requestAnimationFrame(f); }));
 console.log(JSON.stringify({ armed, climbed, padArmed, padClimb, source, fps, errors }, null, 1));

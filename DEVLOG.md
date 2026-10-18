@@ -302,6 +302,65 @@ Probing `distance()` in isolation showed neither problem, because the probe cros
 - Is the target ring and arrow useful in FPV, or distracting?
 - On a phone: menu, results and replay bar readability, and fps during replay with graphs open.
 
-## Next: M6 — Cities
+## M6 — Cities (built; needs a real-phone check)
 
-Procedural low-poly city recipe with instancing/merging; fly-between-buildings playability. Acceptance: holds 60 fps on the target phone; collision feels right between buildings.
+### What exists
+
+- **`world/city.ts`**: an endless low-poly city, Training category.
+  - **Layout:** a 64 m street grid (12 m roads, 3 m sidewalks on a 15 cm curb). Districts come from low-frequency noise:
+    - downtown: 1–2 × 1–2 towers, 30–210 m (taller toward the core), setbacks, spires, skybridges across alleys;
+    - mid-rise: 2–3 × 2–3 blocks, 12–42 m, some setbacks and skybridges;
+    - residential: 3 × 3 houses, 5–12 m;
+    - parks: about 8% of non-downtown blocks.
+    
+    Alleys are 4–12 m. An open plaza (2 × 3 blocks) surrounds the pad, so every drill fits; plaza trees stay 60 m from the pad and clear of the street ahead.
+  - **One function per block:** `genBlock(seed, bx, bz)` produces at most 24 axis-aligned boxes and trees. Collision and rendering both call it. Collision uses exact box distances (and trunk + crown for trees) over a cache of the 3×3 blocks around the drone.
+  - **Rendering** (`render/cityView.ts`): each 128 m chunk (2 × 2 blocks) is one merged mesh and one draw call, pooled and refilled in place. Only the used range of each buffer is uploaded.
+  - **Windows** come from a small Lambert shader patch. It works from per-vertex facade coordinates (metres along the wall, height), so floors line up citywide. It is antialiased with `fwidth`, fades to an average tone at distance, and some windows are warm-lit. The ground floor has no windows.
+  - **One LOD:** geometry is cheap, so no LOD is needed and fog hides the far edge.
+- **Streamer is generic:** `ChunkStreamer<M>`. Generators supply their own buffer type (`createMesh`) and LOD rule (`lodForRing`). Trees and rocks moved into a shared `render/propLayer.ts`.
+- **City race:** a 9-gate street circuit around a 4 × 2-block rectangle, starting straight up the street from the pad. Gates sit mid-block, some high (6–14 m), shifted up to ±3 m across the road. All the drills work in the city unchanged, because they fit in the plaza.
+
+### Measured
+
+- About 17k triangles and 22–51 draw calls at the pad on High (budget: 300k / 150). The city is far cheaper to draw than the hills.
+- Chunk generation is negligible: a 12-minute 40 m/s flight did about 2,500 chunk builds with work p99 ≈ 0 ms, nothing allocated after minute 3, and at most 924 of 2,048 vertex slots used per chunk.
+- Bundle: 190 kB gzipped (+4 kB).
+
+### Testing
+
+- 110 unit tests. New in M6:
+  - city determinism and an open plaza
+  - buildings solid, with an exact distance next to walls (never an overestimate)
+  - every block within its item budget
+  - alleys ≥ 4 m (checked over 441 blocks)
+  - raycasts landing on roofs
+  - a quad stopping at a wall
+  - 12-minute city streaming
+  - city race gates with clear approaches
+  - every activity on every world
+- The allocation test now flies the city: block crossings, wall scrapes, skybridges.
+- The smoke test renders the city from the pad, from above, and down a street, plus the city race.
+
+### Bugs found along the way
+
+- **Cache thrash at block edges.** Collision normals are central differences ±1 mm. When the drone was on a block boundary (and roads run along block boundaries!), the samples alternated between blocks and rebuilt the 3×3-block cache on nearly every call: dozens of block regenerations per tick. Both caches (city blocks, terrain prop cells) now have hysteresis. They are kept until the point is 16 m / 2 m outside their centre cell, and the distance bound shrinks to match (48 m / 3 m). The allocation test caught this through the garbage it made.
+- `genBlock` was too large for V8 to inline a `rand()` call into, so every random number was boxed. Random numbers now come in a precomputed batch per block. Same rule as before: no doubles across non-inlined calls on the physics path.
+
+### Known limitations
+
+- The city is flat (no hills or rivers) and axis-aligned (no Voronoi districts or diagonal avenues yet).
+- No road markings: thin overlays z-fight at distance with this depth range, so they'd have to be built into the road geometry.
+- Buildings have no interiors or parking garages to fly through. Skybridges are the only "fly-under" features.
+- The chase camera only avoids the ground, so it can clip into a wall in a tight alley. Line-of-sight from the plaza loses the quad behind buildings, as in reality.
+
+### Feedback wanted (M6)
+
+- **Fly between buildings:** does collision feel right? Is it too punishing? It uses the same 6 m/s crash rule as everywhere.
+- Are alleys (4 m minimum) and skybridges fun at 5" speeds? More or fewer gaps?
+- On a phone: fps and draw calls downtown on High. It should hold 60 easily.
+- Do the windows shimmer on your screen?
+
+## Next: M7 — Fanciful worlds and polish
+
+At least two non-heightfield recipes (e.g. floating islands, tunnel forest) using the `WorldQuery` interface; sound; effects; profiles; wind option. Acceptance: weird worlds work without any changes to the physics module.
