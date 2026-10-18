@@ -91,3 +91,60 @@ table.map th { text-align: left; text-transform: capitalize; padding: 4px 8px 4p
 table.map td { padding: 4px 6px; }
 .wizard-text { font-size: 16px; font-weight: 600; }
 .wizard-err { color: var(--danger); }
+
+/* ---------- Mobile / touch ---------- */
+html, body { overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; -webkit-tap-highlight-color: transparent; }
+textarea, input[type='number'] { -webkit-user-select: text; user-select: text; }
+body { touch-action: none; }
+.tune-body, .modal-box { touch-action: pan-y; }
+.btn, .tbtn, select, input { touch-action: manipulation; }
+
+.touch { position: absolute; inset: 0; }
+.touch-zone { position: absolute; top: 64px; bottom: 0; touch-action: none; }
+.touch-zone.left { left: 0; right: 50%; }
+.touch-zone.right { left: 50%; right: 0; }
+.stick-base, .stick-knob { position: absolute; left: 0; top: 0; pointer-events: none; will-change: transform; }
+.stick-base { border: 2px solid rgba(255, 255, 255, 0.85); border-radius: 22%; background: rgba(0, 0, 0, 0.18);
+  background-image: linear-gradient(rgba(255,255,255,0.35), rgba(255,255,255,0.35)), linear-gradient(rgba(255,255,255,0.35), rgba(255,255,255,0.35));
+  background-size: 2px 100%, 100% 2px; background-position: center; background-repeat: no-repeat; }
+.stick-knob { border-radius: 50%; background: rgba(255, 255, 255, 0.85); box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.35); }
+.stick-knob.active { background: #ffc531; }
+.touch-bar { position: absolute; top: max(8px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 2; }
+.tbtn { min-width: 48px; min-height: 40px; padding: 0 10px; border-radius: 8px; border: 1px solid rgba(255, 255, 255, 0.5); background: rgba(13, 17, 23, 0.55); color: #fff;
+  font: 700 13px ui-monospace, monospace; letter-spacing: 0.04em; touch-action: none; }
+.tbtn:active { background: rgba(255, 255, 255, 0.25); }
+.tbtn.arm { min-width: 76px; }
+.tbtn.arm.on { background: #ff5a36; border-color: #ff5a36; }
+.tbtn.mode { min-width: 76px; }
+
+.rotate { position: absolute; inset: 0; background: #0d1117; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 12px; font-size: 18px; z-index: 50; }
+.rotate.show { display: flex; }
+.rotate-icon { font-size: 64px; animation: spin 2.5s ease-in-out infinite; }
+@keyframes spin { 0%, 30% { transform: rotate(0deg); } 60%, 100% { transform: rotate(90deg); } }
+.notice { position: absolute; left: 50%; top: 60px; transform: translateX(-50%); background: rgba(13, 17, 23, 0.9); border: 1px solid var(--line); padding: 8px 14px; border-radius: 8px;
+  opacity: 0; transition: opacity 0.3s; pointer-events: none !important; }
+.notice.show { opacity: 1; }
+.note.warn { background: #2a2414; border-left-color: #ffc531; }
+.hidden-touch { display: none; }
+.btn.big { min-height: 48px; min-width: 120px; font-size: 16px; }
+.tune-row.sel { grid-template-columns: 1fr auto; }
+
+/* Small landscape phones: tighter OSD, full-width drawer. */
+@media (max-height: 500px) {
+  .osd { font-size: 13px; }
+  .osd-tc { top: 64px; }
+  .debug { top: 56px; transform: scale(0.8); transform-origin: top left; }
+  .modal-box { padding: 12px 14px; max-height: 94vh; }
+  .modal-box h2 { font-size: 16px; }
+}
+@media (max-width: 520px) { .tune { width: 100vw; } }
+
+/* Stacking: touch layer < OSD < drawer < notices < dialogs < rotate prompt. */
+.touch { z-index: 1; }
+.osd { z-index: 2; }
+.debug { z-index: 3; }
+.tune { z-index: 10; }
+.notice { z-index: 15; }
+.modal { z-index: 20; }
+/* Keep the dialog's main action reachable without scrolling on short screens. */
+.modal-box > .btn.big { position: sticky; bottom: 0; box-shadow: 0 -8px 16px var(--panel); }

@@ -3,7 +3,7 @@
  * input -> RcChannels (per tick) -> sim (fixed 500 Hz) -> interpolated render.
  */
 import * as THREE from 'three';
-import { FixedStepper, Quad, Quat, type SimParams } from './sim';
+import { FixedStepper, hoverThrottle, Quad, Quat, type SimParams } from './sim';
 import { InputManager } from './input/manager';
 import type { GamepadMapping } from './input/gamepad';
 import { buildSandbox, type SandboxWorld } from './world/sandbox';
@@ -17,6 +17,11 @@ import { helpPanel } from './ui/help';
 import { GamepadSetup } from './ui/gamepadSetup';
 import { isTyping } from './ui/dom';
 import { FrameStats } from './platform/perf';
+import { LatencyMeter } from './platform/latency';
+import { FrameGovernor, PRESETS } from './platform/quality';
+import { enterFullscreen, isPortrait, isTouchDevice, suppressBrowserGestures, vibrate } from './platform/display';
+import { TouchControls } from './ui/touchControls';
+import { h } from './ui/dom';
 import { debouncedSaver } from './platform/storage';
 import type { AppSettings, CameraMode } from './settings';
 
@@ -36,9 +41,18 @@ export class App {
   private readonly tuning: TuningPanel;
   private readonly stats = new FrameStats();
   private readonly save: () => void;
+  private readonly touchUi: TouchControls;
+  readonly latency = new LatencyMeter();
+  readonly governor = new FrameGovernor();
+  private readonly rotateOverlay: HTMLElement;
+  private readonly notice: HTMLElement;
+  private noticeUntil = 0;
   private modal: HTMLElement | null = null;
   private armedTime = 0;
   private last = 0;
+  private wasArmed = false;
+  private wasCrashed = false;
+  private readonly touchDevice = isTouchDevice();
 
   // Per-frame scratch (no allocation in the loop).
   private readonly qInterp = new Quat();
@@ -54,7 +68,7 @@ export class App {
     this.save = debouncedSaver('settings', () => this.settings);
     this.world = buildSandbox(1);
     this.quad = new Quad(settings.sim, 1 / SIM_HZ);
-    this.input = new InputManager(settings.input, 1 / SIM_HZ, {
+    this.input = new InputManager(settings.input, settings.touch, 1 / SIM_HZ, {
       reset: () => this.reset(),
       cycleCamera: () => this.cycleCamera(),
     });
@@ -69,9 +83,21 @@ export class App {
       openGamepadSetup: () => this.openGamepadSetup(),
       gamepadStatus: () => this.gamepadStatus(),
     });
+    this.touchUi = new TouchControls(this.input.touch, () => this.settings.touch, this.latency, {
+      arm: () => this.input.toggleArm(),
+      mode: () => this.input.cycleMode(),
+      camera: () => this.cycleCamera(),
+      reset: () => this.reset(),
+      tune: () => this.tuning.toggle(),
+      fullscreen: () => void enterFullscreen().then(() => this.resize()),
+    });
+    this.input.touch.hoverThrottle = hoverThrottle(settings.sim);
+    this.rotateOverlay = h('div', { class: 'rotate' }, h('div', { class: 'rotate-icon' }, '⟳'), h('div', null, 'Turn your phone sideways to fly'));
+    this.notice = h('div', { class: 'notice' });
     this.osdInfo = { state: this.quad.state, mode: 'acro', armBlock: 'none', armedTime: 0, throttle: 0, cells: settings.sim.quad.battery.cells, source: '', camera: '' };
 
-    ui.append(this.osd.root, this.debug.root, this.tuning.root);
+    ui.append(this.touchUi.root, this.osd.root, this.debug.root, this.tuning.root, this.notice, this.rotateOverlay);
+    if (this.touchDevice) suppressBrowserGestures();
     this.osd.visible = settings.ui.osd;
     this.debug.visible = settings.ui.debug;
     this.reset();
@@ -92,19 +118,39 @@ export class App {
   // ------------------------------------------------------------------ loop
 
   private frame(now: number): void {
+    const g = this.settings.graphics;
+    // Battery saver: on >60 Hz displays, process every other vsync (still >= 60 fps).
+    if (g.batterySaver && this.governor.vsync < 14 && now - this.last < 14) return;
     const frameMs = now - this.last;
     const dt = Math.min(frameMs / 1000, 0.25);
     this.last = now;
+    if (this.governor.frame(frameMs, { dynamic: g.dynamicResolution, autoDowngrade: g.autoDowngrade, preset: g.quality, setPreset: (q) => (g.quality = q) })) {
+      if (this.governor.downgradedTo) {
+        this.showNotice(`Graphics lowered to ${this.governor.downgradedTo.toUpperCase()} to keep the frame rate`);
+        this.governor.downgradedTo = null;
+        this.save();
+        this.tuning.rebuild();
+      }
+      this.resize();
+    }
 
     this.input.pollFrame();
+    this.latency.consume(now);
     const t0 = performance.now();
-    // Physics pauses while a dialog (help, controller setup) is open.
-    if (!this.modal) this.stepper.advance(dt);
+    // Physics pauses while a dialog (help, controller setup) or the rotate prompt is up.
+    const paused = !!this.modal || this.rotateOverlay.classList.contains('show');
+    if (!paused) this.stepper.advance(dt);
     else this.stepper.lastTicks = 0;
     const physMs = performance.now() - t0;
 
     const s = this.quad.state;
     if (s.armed) this.armedTime += dt;
+    if (this.settings.touch.haptics) {
+      if (s.armed !== this.wasArmed) vibrate(s.armed ? 40 : [20, 40, 20]);
+      if (s.crashed && !this.wasCrashed) vibrate(120);
+    }
+    this.wasArmed = s.armed;
+    this.wasCrashed = s.crashed;
 
     // Interpolate between the last two physics states.
     const { prev, curr, alpha } = this.stepper;
@@ -126,6 +172,11 @@ export class App {
     const w = this.canvas.clientWidth, hgt = this.canvas.clientHeight;
     this.rig.update(cam, p, q, w / Math.max(hgt, 1), dt);
     this.view.render(this.rig.camera);
+    if (this.touchUi.visible) this.touchUi.render(s.armed, this.input.mode);
+    if (this.noticeUntil && now > this.noticeUntil) {
+      this.notice.classList.remove('show');
+      this.noticeUntil = 0;
+    }
 
     this.stats.push(frameMs, physMs, this.stepper.lastTicks);
     const o = this.osdInfo;
@@ -134,7 +185,7 @@ export class App {
     o.armedTime = this.armedTime;
     o.throttle = this.input.last.throttle;
     o.cells = this.settings.sim.quad.battery.cells;
-    o.source = this.input.source === 'gamepad' ? 'gamepad' : 'keyboard';
+    o.source = this.input.source;
     o.camera = cam.mode.toUpperCase();
     this.osd.update(now, o);
     if (this.debug.visible) {
@@ -151,6 +202,11 @@ export class App {
         setpoint: this.quad.fc.setpoint,
         motors: s.motorCmd,
         inputLatencyMs: gp.connected ? performance.now() - gp.timestamp : null,
+        latency: this.latency.sampleCount ? this.latency.stats() : null,
+        renderScale: this.governor.scale,
+        pixelRatio: this.view.renderer.getPixelRatio(),
+        vsyncMs: this.governor.vsync,
+        quality: g.quality,
       });
     }
   }
@@ -165,6 +221,19 @@ export class App {
     this.armedTime = 0;
   }
 
+  private showNotice(text: string): void {
+    this.notice.textContent = text;
+    this.notice.classList.add('show');
+    this.noticeUntil = performance.now() + 4000;
+  }
+
+  /** Touch UI shows on touch devices (or when forced on), unless a gamepad is in use. */
+  private updateTouchVisibility(): void {
+    const t = this.settings.touch.enabled;
+    const want = (t === 'on' || (t === 'auto' && this.touchDevice)) && this.input.source !== 'gamepad';
+    if (want !== this.touchUi.visible) this.touchUi.visible = want;
+  }
+
   private cycleCamera(): void {
     const c = this.settings.camera;
     c.mode = CAMERAS[(CAMERAS.indexOf(c.mode) + 1) % CAMERAS.length];
@@ -172,15 +241,30 @@ export class App {
   }
 
   private onSettingsChange(kind: ChangeKind): void {
-    if (kind === 'sim') this.quad.applyParams(this.settings.sim);
-    if (kind === 'input') this.input.applySettings(this.settings.input);
-    if (kind === 'graphics') this.resize();
+    if (kind === 'sim') {
+      this.quad.applyParams(this.settings.sim);
+      this.input.touch.hoverThrottle = hoverThrottle(this.settings.sim);
+    }
+    if (kind === 'input' || kind === 'touch') this.input.applySettings(this.settings.input, this.settings.touch);
+    if (kind === 'touch') {
+      this.updateTouchVisibility();
+      this.touchUi.layout();
+    }
+    if (kind === 'ui') {
+      this.debug.visible = this.settings.ui.debug;
+      this.osd.visible = this.settings.ui.osd;
+    }
+    if (kind === 'graphics') {
+      this.governor.reset();
+      this.resize();
+    }
     this.save();
   }
 
   private replaceSim(p: SimParams): void {
     this.settings.sim = p;
     this.quad.applyParams(p);
+    this.input.touch.hoverThrottle = hoverThrottle(p);
     this.save();
   }
 
@@ -211,10 +295,12 @@ export class App {
 
   private showHelp(): void {
     this.closeModal();
-    this.modal = helpPanel(() => {
+    this.modal = helpPanel(this.touchDevice, () => {
       this.closeModal();
       this.settings.ui.helpSeen = true;
       this.save();
+      // "Fly" is a user gesture: the one moment browsers allow fullscreen + orientation lock.
+      if (this.touchDevice) void enterFullscreen().then(() => this.resize());
     });
     this.ui.append(this.modal);
   }
@@ -231,6 +317,7 @@ export class App {
       if (isTyping(e)) return;
       if (this.input.keyboard.key(e.code, true)) {
         e.preventDefault();
+        if (!e.repeat) this.latency.mark(e.timeStamp);
         return;
       }
       if (e.repeat) return;
@@ -280,16 +367,31 @@ export class App {
     });
     window.addEventListener('keyup', (e) => this.input.keyboard.key(e.code, false));
     // Failsafes: never leave keys "stuck" or a quad flying in a hidden tab.
-    window.addEventListener('blur', () => this.input.keyboard.releaseAll());
+    window.addEventListener('blur', () => {
+      this.input.keyboard.releaseAll();
+      this.input.touch.releaseAll();
+    });
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) this.input.failsafe();
     });
     window.addEventListener('resize', () => this.resize());
+    window.visualViewport?.addEventListener('resize', () => this.resize());
+    screen.orientation?.addEventListener?.('change', () => setTimeout(() => this.resize(), 100));
+    // Gamepad picked up / put down: hide or show the touch sticks.
+    setInterval(() => this.updateTouchVisibility(), 500);
   }
 
   private resize(): void {
+    const g = this.settings.graphics;
+    const preset = PRESETS[g.quality];
     const r = this.view.renderer;
-    r.setPixelRatio(Math.min(window.devicePixelRatio || 1, this.settings.graphics.maxPixelRatio));
+    const base = Math.min(window.devicePixelRatio || 1, g.maxPixelRatio, preset.pixelRatio);
+    const ratio = Math.max(0.35, base * this.governor.scale * (g.batterySaver ? 0.75 : 1));
+    if (Math.abs(r.getPixelRatio() - ratio) > 1e-3) r.setPixelRatio(ratio);
     r.setSize(window.innerWidth, window.innerHeight, false);
+    this.view.setDrawDistance(preset.drawDistance, this.rig.camera);
+    this.touchUi.layout();
+    this.updateTouchVisibility();
+    this.rotateOverlay.classList.toggle('show', this.touchDevice && isPortrait());
   }
 }

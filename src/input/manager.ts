@@ -4,12 +4,13 @@
  * Gamepad API once per frame (browsers only refresh it per frame anyway).
  */
 import type { FlightMode, QuadState, RcChannels } from '../sim';
-import type { InputSettings } from '../settings';
+import type { InputSettings, TouchSettings } from '../settings';
 import { defaultMappingFor, GamepadInput, readSwitch, switchPosition, type GamepadMapping } from './gamepad';
 import { KeyboardInput } from './keyboard';
+import { TouchInput } from './touch';
 import { shapeStick, shapeThrottle } from './shaping';
 
-export type InputSource = 'keyboard' | 'gamepad';
+export type InputSource = 'keyboard' | 'gamepad' | 'touch';
 
 export interface InputActions {
   reset(): void;
@@ -21,6 +22,7 @@ const MODES: FlightMode[] = ['acro', 'angle', 'horizon'];
 export class InputManager {
   readonly keyboard: KeyboardInput;
   readonly gamepad: GamepadInput;
+  readonly touch: TouchInput;
   /** Virtual arm switch shared by all sources. */
   armSwitch = false;
   mode: FlightMode = 'acro';
@@ -32,9 +34,11 @@ export class InputManager {
 
   constructor(
     private settings: InputSettings,
+    private touchSettings: TouchSettings,
     private readonly tickDt: number,
     private readonly actions: InputActions,
   ) {
+    this.touch = new TouchInput(touchSettings);
     this.keyboard = new KeyboardInput(settings.keyboardStickSpeed, settings.keyboardThrottleSpeed);
     this.gamepad = new GamepadInput((pad) => this.mappingFor(pad));
   }
@@ -44,8 +48,10 @@ export class InputManager {
     return this.settings.gamepads[pad.id] ?? defaultMappingFor(pad);
   }
 
-  applySettings(s: InputSettings): void {
+  applySettings(s: InputSettings, t: TouchSettings = this.touchSettings): void {
     this.settings = s;
+    this.touchSettings = t;
+    this.touch.apply(t);
     this.keyboard.stickSpeed = s.keyboardStickSpeed;
     this.keyboard.throttleSpeed = s.keyboardThrottleSpeed;
     if (this.gamepad.id) this.gamepad.setMapping(s.gamepads[this.gamepad.id] ?? this.gamepad.mapping!);
@@ -67,12 +73,14 @@ export class InputManager {
   failsafe(): void {
     this.armSwitch = false;
     this.keyboard.releaseAll();
+    this.touch.releaseAll();
   }
 
   /** After a sim reset: disarmed, keyboard throttle at zero. */
   onReset(): void {
     this.armSwitch = false;
     this.keyboard.throttle = 0;
+    this.touch.resetThrottle();
   }
 
   pollFrame(): void {
@@ -106,13 +114,17 @@ export class InputManager {
   }
 
   /** Per-physics-tick sampler for FixedStepper. */
-  readonly sampler = (rc: RcChannels, _state: QuadState): void => {
+  readonly sampler = (rc: RcChannels, state: QuadState): void => {
     const kb = this.keyboard;
     kb.update(this.tickDt);
     if (kb.active) this.source = 'keyboard';
-    const sh = this.settings.shaping;
+    const touch = this.touch;
+    touch.update(state.armed, this.tickDt);
+    if (touch.active) this.source = 'touch';
+    const useTouch = this.source === 'touch';
+    const sh = useTouch ? this.touchSettings.shaping : this.settings.shaping;
     const useGp = this.source === 'gamepad' && this.gamepad.connected;
-    const src = useGp ? this.gamepad : kb;
+    const src = useTouch ? touch : useGp ? this.gamepad : kb;
     rc.roll = shapeStick(src.roll, sh.roll);
     rc.pitch = shapeStick(src.pitch, sh.pitch);
     rc.yaw = shapeStick(src.yaw, sh.yaw);

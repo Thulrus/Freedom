@@ -2,7 +2,7 @@
 
 A browser FPV drone simulator, mobile-first, for practicing real acro flying. It uses procedurally generated worlds. It is static files only, with no backend. The full spec is in [`docs/SPEC.md`](docs/SPEC.md).
 
-**Status: Milestone 2 (flyable desktop sandbox) is built. It still needs a hands-on check with a real radio or gamepad on real hardware.** You can fly with a keyboard, a gamepad, or a radio in USB joystick mode. Touch controls and the PWA come in M3. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
+**Status: Milestone 3 (mobile touch + performance baseline) is built.** It still needs checking on a real Android phone and an iPhone; see [`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md). M2 still needs a hands-on check with a real radio or gamepad. You can fly with a keyboard, a gamepad, or a radio in USB joystick mode. Touch controls and the PWA come in M3. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
 
 ## Quick start
 
@@ -12,6 +12,7 @@ npm run dev       # open the printed URL and fly
 npm test          # headless test suite (Vitest, Node)
 npm run typecheck # whole project + sim/ checked with NO DOM types
 npm run smoke     # build + headless-browser flight test, screenshots in smoke-out/
+npm run smoke:mobile  # emulated phone: two-thumb touch flight, gestures, portrait, offline
 npm run plots     # writes step-response plots to docs/plots/*.svg
 ```
 
@@ -30,6 +31,10 @@ Press **H** in the app for the full list of controls.
 | R | reset to launch pad |
 | T / G / O | tuning panel / debug overlay / OSD |
 
+**Touch** (phones and tablets): the left thumb controls throttle and yaw, the right thumb pitch and roll, in Mode 2. Modes 1, 3 and 4 are in ⚙ → Touch sticks. Your thumb can land anywhere on its half of the screen and the stick never jumps. Throttle stays where you leave it; a self-centering "release = hover" option exists for beginners. Use the on-screen ARM, mode, CAM and RESET buttons. Touch sticks are only an approximation: plug in a radio or gamepad for practice that transfers to a real quad.
+
+**Install as an app**: on Android choose "Install app"; on iPhone use Share → Add to Home Screen. It runs full-screen in landscape and works offline.
+
 **Gamepad** (standard layout, Mode 2): left stick is throttle/yaw and right stick is pitch/roll. Start arms, Y cycles the mode, Back resets and LB changes the camera.
 
 **Radio transmitter**: set the model to USB Joystick mode. Then open **T → Controls → Set up controller / radio…** and run the calibration wizard. It detects each axis, its direction and range, and your arm and mode switches. The mapping is saved per device.
@@ -45,7 +50,7 @@ src/
   world/     Worlds as WorldQuery (M2: sandbox with ground, pillars, buildings, gates)
   render/    Three.js scene, drone model, FPV/chase/LOS camera rig
   ui/        OSD, tuning panel, debug overlay, controller setup, help
-  platform/  Storage, frame stats
+  platform/  Storage, frame stats, dynamic resolution, latency meter, fullscreen/orientation, PWA
   app.ts     Wires the loop: input -> fixed-step sim -> interpolated render
   settings.ts  Persisted app settings (sim params, camera, input, graphics)
   tests/     Headless tests
@@ -144,7 +149,15 @@ These are saved in localStorage under `freedom.settings` and edited in the tunin
 | `camera.losFov` | deg, vertical | 50 |
 | `input.shaping.{roll,pitch,yaw,throttle}.{deadzone,expo,sensitivity}` | 0..1 | 0.02 / 0 / 1 (throttle: no deadzone) |
 | `input.keyboardStickSpeed`, `keyboardThrottleSpeed` | full travel / s | 5, 0.6 |
+| `graphics.quality` | low / medium / high | high (pixel ratio 1 / 1.5 / 2, draw distance 280 / 420 / 600 m) |
+| `graphics.dynamicResolution`, `autoDowngrade` | bool | true, true |
+| `graphics.batterySaver` | bool | false (×0.75 resolution, max 60 fps on 90/120 Hz screens; physics unchanged) |
 | `graphics.maxPixelRatio` | × | 2 |
+| `touch.mode` | 1–4 | 2 |
+| `touch.floating`, `throttleCentering`, `haptics` | bool | false, false, true |
+| `touch.size` / `insetX` / `insetY` | fraction of screen | 0.2 / 0.16 / 0.3 |
+| `touch.opacity` | 0..1 | 0.55 |
+| `touch.shaping.{roll,pitch,yaw,throttle}` | deadzone / expo / sensitivity | 0.03 / 0.2 / 1 (yaw deadzone 0.05; throttle none) |
 
 ### Environment (`env`)
 

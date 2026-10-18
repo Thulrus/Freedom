@@ -7,7 +7,7 @@ import { defaultSettings, type AppSettings, type StickShaping } from '../setting
 import { downloadText, pickTextFile } from '../platform/storage';
 import { h, type Child } from './dom';
 
-export type ChangeKind = 'sim' | 'camera' | 'input' | 'graphics';
+export type ChangeKind = 'sim' | 'camera' | 'input' | 'graphics' | 'touch' | 'ui';
 
 export interface TuningHost {
   settings(): AppSettings;
@@ -121,10 +121,17 @@ export class TuningPanel {
         this.num('Keyboard stick speed', () => S().input.keyboardStickSpeed, (v) => (S().input.keyboardStickSpeed = v), ch('input'), { min: 1, max: 20, step: 0.5, unit: '/s' }),
         this.num('Keyboard throttle speed', () => S().input.keyboardThrottleSpeed, (v) => (S().input.keyboardThrottleSpeed = v), ch('input'), { min: 0.1, max: 2, step: 0.05, unit: '/s' }),
       ]),
+      this.section('Touch sticks', this.touchSection()),
       this.section('Graphics', [
+        this.select('Quality', [['high', 'High'], ['medium', 'Medium'], ['low', 'Low']], () => S().graphics.quality, (v) => (S().graphics.quality = v as AppSettings['graphics']['quality']), ch('graphics')),
+        this.check('Show debug overlay (fps, latency)', () => S().ui.debug, (v) => (S().ui.debug = v), ch('ui')),
+        this.check('Show OSD', () => S().ui.osd, (v) => (S().ui.osd = v), ch('ui')),
+        this.check('Dynamic resolution (keeps 60 fps)', () => S().graphics.dynamicResolution, (v) => (S().graphics.dynamicResolution = v), ch('graphics')),
+        this.check('Auto-lower quality if needed', () => S().graphics.autoDowngrade, (v) => (S().graphics.autoDowngrade = v), ch('graphics')),
+        this.check('Battery / thermal saver', () => S().graphics.batterySaver, (v) => (S().graphics.batterySaver = v), ch('graphics')),
+        h('div', { class: 'tune-info' }, 'Saver lowers resolution and skips frames above 60 fps on 90/120 Hz screens. Physics always runs at full rate, so flight feel does not change.'),
         this.num('Max pixel ratio', () => S().graphics.maxPixelRatio, (v) => (S().graphics.maxPixelRatio = v), ch('graphics'), { min: 0.5, max: 3, step: 0.25 }),
-        h('div', { class: 'tune-info' }, 'Antialiasing changes apply after reload.'),
-        this.check('Antialiasing', () => S().graphics.antialias, (v) => (S().graphics.antialias = v), ch('graphics')),
+        this.check('Antialiasing (after reload)', () => S().graphics.antialias, (v) => (S().graphics.antialias = v), ch('graphics')),
       ]),
       this.section('Share / import', this.jsonSection()),
     );
@@ -238,14 +245,32 @@ export class TuningPanel {
     ];
   }
 
-  private shapingRows(axis: 'roll' | 'pitch' | 'yaw' | 'throttle'): HTMLElement[] {
-    const sh = (): StickShaping => this.host.settings().input.shaping[axis];
-    const c = () => this.host.onChange('input');
+  private shapingRows(axis: 'roll' | 'pitch' | 'yaw' | 'throttle', source: 'input' | 'touch' = 'input'): HTMLElement[] {
+    const sh = (): StickShaping => this.host.settings()[source].shaping[axis];
+    const c = () => this.host.onChange(source);
     return [
       h('div', { class: 'tune-sub' }, `${axis} stick`),
       this.num('Deadzone', () => sh().deadzone, (v) => (sh().deadzone = v), c, { min: 0, max: 0.3, step: 0.01 }),
       this.num('Expo', () => sh().expo, (v) => (sh().expo = v), c, { min: 0, max: 1, step: 0.01 }),
       this.num('Sensitivity', () => sh().sensitivity, (v) => (sh().sensitivity = v), c, { min: 0.2, max: 1, step: 0.01 }),
+    ];
+  }
+
+  private touchSection(): Child[] {
+    const t = () => this.host.settings().touch;
+    const c = () => this.host.onChange('touch');
+    return [
+      this.select('Show touch sticks', [['auto', 'Auto (touch screens)'], ['on', 'Always'], ['off', 'Never']], () => t().enabled, (v) => (t().enabled = v as 'auto' | 'on' | 'off'), c),
+      this.select('Stick mode', [['2', 'Mode 2 (throttle left)'], ['1', 'Mode 1 (throttle right)'], ['3', 'Mode 3'], ['4', 'Mode 4']], () => String(t().mode), (v) => (t().mode = +v as 1 | 2 | 3 | 4), c),
+      this.check('Floating sticks (base follows your thumb)', () => t().floating, (v) => (t().floating = v), c),
+      this.check('Self-centering throttle (beginner: release = hover)', () => t().throttleCentering, (v) => (t().throttleCentering = v), c),
+      this.num('Stick size', () => t().size, (v) => (t().size = v), c, { min: 0.1, max: 0.35, step: 0.01 }),
+      this.num('Distance from side', () => t().insetX, (v) => (t().insetX = v), c, { min: 0.06, max: 0.4, step: 0.01 }),
+      this.num('Distance from bottom', () => t().insetY, (v) => (t().insetY = v), c, { min: 0.1, max: 0.6, step: 0.01 }),
+      this.num('Opacity', () => t().opacity, (v) => (t().opacity = v), c, { min: 0.1, max: 1, step: 0.05 }),
+      this.check('Vibrate on arm / crash', () => t().haptics, (v) => (t().haptics = v), c),
+      h('div', { class: 'tune-info' }, 'Touch shaping is separate from gamepad/radio shaping and applies before your rates.'),
+      ...(['roll', 'pitch', 'yaw', 'throttle'] as const).flatMap((axis) => this.shapingRows(axis, 'touch')),
     ];
   }
 
@@ -321,6 +346,15 @@ export class TuningPanel {
     range.addEventListener('input', () => apply(parseFloat(range.value), range));
     box.addEventListener('change', () => apply(parseFloat(box.value), box));
     return h('div', { class: 'tune-row', title: o.hint ?? '' }, h('label', null, label, o.unit ? h('span', { class: 'tune-dim' }, ` ${o.unit}`) : null), range, box);
+  }
+
+  private select(label: string, options: [string, string][], get: () => string, set: (v: string) => void, changed: () => void): HTMLElement {
+    const sel = h(
+      'select',
+      { onchange: () => { set(sel.value); changed(); } },
+      ...options.map(([v, l]) => h('option', { value: v, selected: get() === v }, l)),
+    );
+    return h('div', { class: 'tune-row sel' }, h('label', null, label), sel);
   }
 
   private check(label: string, get: () => boolean, set: (v: boolean) => void, changed: () => void): HTMLElement {

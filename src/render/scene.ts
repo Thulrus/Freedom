@@ -41,6 +41,15 @@ export class SceneView {
     this.scene.add(makeBoxes(world));
   }
 
+  /** Fog end and camera far plane follow the quality preset's draw distance. */
+  setDrawDistance(d: number, camera: THREE.PerspectiveCamera): void {
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = d * 0.13;
+    fog.far = d;
+    camera.far = d * 1.5;
+    camera.updateProjectionMatrix();
+  }
+
   /** Keep ground and sky centered on the camera (they are effectively infinite). */
   follow(camera: THREE.Camera): void {
     const p = camera.position;

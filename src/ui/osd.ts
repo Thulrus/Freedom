@@ -55,7 +55,7 @@ export class Osd {
     const t = Math.floor(o.armedTime);
     setText(e.timer, `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);
     setText(e.thr, `THR ${Math.round(o.throttle * 100)}%`);
-    setText(e.src, `${o.source} · ${o.camera} cam · H for help`);
+    setText(e.src, o.source === 'touch' ? `${o.camera} cam` : `${o.source} · ${o.camera} cam · H for help`);
     let warn = '';
     if (s.crashed) warn = 'CRASHED · DISARM TO CLEAR · R TO RESET';
     else if (!s.armed && o.armBlock === 'throttle') warn = 'THROTTLE HIGH · LOWER TO ARM';

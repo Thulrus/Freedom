@@ -13,6 +13,12 @@ export interface DebugInfo {
   setpoint: Float64Array;
   motors: Float64Array;
   inputLatencyMs: number | null;
+  /** Touch/keyboard event -> physics consumption, ms. */
+  latency: { avg: number; p95: number } | null;
+  renderScale: number;
+  pixelRatio: number;
+  vsyncMs: number;
+  quality: string;
 }
 
 const W = 240, H = 70;
@@ -61,6 +67,8 @@ export class DebugOverlay {
         `gyro  ${r(d.gyro[0])}${r(d.gyro[1])}${r(d.gyro[2])} deg/s`,
         `sp    ${r(d.setpoint[0])}${r(d.setpoint[1])}${r(d.setpoint[2])}`,
         `motor ${Array.from(d.motors, (m) => (m * 100).toFixed(0).padStart(4)).join('')} %`,
+        `res   ${d.quality} · scale ${d.renderScale.toFixed(2)} · dpr ${d.pixelRatio.toFixed(2)} · vsync ${(1000 / d.vsyncMs).toFixed(0)} Hz`,
+        d.latency ? `input→sim ${d.latency.avg.toFixed(1)} ms avg, ${d.latency.p95.toFixed(1)} p95 (+~1 frame to screen)` : 'input→sim  (touch or press a key)',
         d.inputLatencyMs !== null ? `gamepad sample age ${d.inputLatencyMs.toFixed(1)} ms` : '',
       ].join('\n'),
     );

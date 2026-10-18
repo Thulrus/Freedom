@@ -39,10 +39,46 @@ export interface InputSettings {
   keyboardThrottleSpeed: number;
 }
 
+export type QualityPreset = 'low' | 'medium' | 'high';
+
 export interface GraphicsSettings {
-  /** Max device pixel ratio used for rendering. */
+  /** Low / Medium / High: pixel-ratio cap, draw distance. */
+  quality: QualityPreset;
+  /** Lower render resolution automatically when frames are missed. */
+  dynamicResolution: boolean;
+  /** Drop the quality preset if dynamic resolution alone can't hold the frame rate. */
+  autoDowngrade: boolean;
+  /** Battery / thermal saver: never render above 60 fps, lower resolution. Physics is unchanged. */
+  batterySaver: boolean;
+  /** Hard cap on device pixel ratio, on top of the preset. */
   maxPixelRatio: number;
+  /** Needs a reload to change (WebGL context option). */
   antialias: boolean;
+}
+
+export type StickMode = 1 | 2 | 3 | 4;
+
+export interface TouchSettings {
+  /** Show touch sticks: auto = on touch devices. */
+  enabled: 'auto' | 'on' | 'off';
+  /** Transmitter mode. Mode 2 = throttle/yaw on the left. */
+  mode: StickMode;
+  /** Floating sticks re-center under your thumb where you touch. */
+  floating: boolean;
+  /** Beginner option: throttle springs back to hover when released. */
+  throttleCentering: boolean;
+  /** Stick travel radius as a fraction of the screen's short side. */
+  size: number;
+  /** Stick center distance from the left/right edge, fraction of screen width. */
+  insetX: number;
+  /** Stick center distance from the bottom, fraction of screen height. */
+  insetY: number;
+  /** Stick graphics opacity 0..1. */
+  opacity: number;
+  /** Vibrate on arm/disarm and crashes (Android). */
+  haptics: boolean;
+  /** Per-channel shaping for touch (separate from gamepad/radio). */
+  shaping: { roll: StickShaping; pitch: StickShaping; yaw: StickShaping; throttle: StickShaping };
 }
 
 export interface AppSettings {
@@ -51,6 +87,7 @@ export interface AppSettings {
   camera: CameraSettings;
   input: InputSettings;
   graphics: GraphicsSettings;
+  touch: TouchSettings;
   ui: { osd: boolean; debug: boolean; helpSeen: boolean };
 }
 
@@ -67,7 +104,24 @@ export function defaultSettings(): AppSettings {
       keyboardStickSpeed: 5,
       keyboardThrottleSpeed: 0.6,
     },
-    graphics: { maxPixelRatio: 2, antialias: true },
+    graphics: { quality: 'high', dynamicResolution: true, autoDowngrade: true, batterySaver: false, maxPixelRatio: 2, antialias: true },
+    touch: {
+      enabled: 'auto',
+      mode: 2,
+      floating: false,
+      throttleCentering: false,
+      size: 0.2,
+      insetX: 0.16,
+      insetY: 0.3,
+      opacity: 0.55,
+      haptics: true,
+      shaping: {
+        roll: { deadzone: 0.03, expo: 0.2, sensitivity: 1 },
+        pitch: { deadzone: 0.03, expo: 0.2, sensitivity: 1 },
+        yaw: { deadzone: 0.05, expo: 0.2, sensitivity: 1 },
+        throttle: { deadzone: 0, expo: 0, sensitivity: 1 },
+      },
+    },
     ui: { osd: true, debug: false, helpSeen: false },
   };
 }
