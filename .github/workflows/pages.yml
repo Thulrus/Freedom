@@ -1,10 +1,10 @@
 # Publishes the app to GitHub Pages (HTTPS, needed for offline mode and
-# low-latency touch input on phones). One-time setup: repo Settings → Pages →
-# Source: "GitHub Actions". Runs on pushes to main, or manually from the Actions tab.
+# low-latency touch input on phones).
+# One-time setup: repo Settings → Pages → Build and deployment → Source: "GitHub Actions".
+# Deploys on every push to the repository's default branch, or manually from the Actions tab.
 name: Deploy to GitHub Pages
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,6 +15,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   build:
+    if: github.ref_name == github.event.repository.default_branch
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,6 +26,7 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npx vite build
+      - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist

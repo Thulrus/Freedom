@@ -1,5 +1,7 @@
 # Freedom FPV
 
+**Fly it in your browser: https://thulrus.github.io/Freedom/** (desktop or phone; on a phone, add it to your home screen for full-screen offline play).
+
 A browser FPV drone simulator, mobile-first, for practicing real acro flying. It uses procedurally generated worlds. It is static files only, with no backend. The full spec is in [`docs/SPEC.md`](docs/SPEC.md).
 
 **Status: Milestone 3 (mobile touch + performance baseline) is built.** It still needs checking on a real Android phone and an iPhone; see [`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md). M2 still needs a hands-on check with a real radio or gamepad. You can fly with a keyboard, a gamepad, or a radio in USB joystick mode. Touch controls and the PWA come in M3. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.

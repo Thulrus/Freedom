@@ -6,9 +6,7 @@ M3 is accepted only after real-device checks: at least one mid-range Android pho
 
 The app needs **HTTPS** for offline mode and low-latency touch events. Use GitHub Pages:
 
-1. Merge to `main`.
-2. In the repo, open Settings → Pages → Source, and choose **GitHub Actions**. Do this once.
-3. The "Deploy to GitHub Pages" workflow publishes `https://<user>.github.io/<repo>/`.
+Open **https://thulrus.github.io/Freedom/**. Every push to the default branch redeploys it through the "Deploy to GitHub Pages" workflow.
 
 Quick LAN test without HTTPS: run `npm run dev -- --host` and open the printed network URL. Everything works except offline mode, and `pointerrawupdate` is off, so latency reads slightly higher.
 
