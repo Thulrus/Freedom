@@ -7,8 +7,10 @@ const X_AXIS = new THREE.Vector3(1, 0, 0);
 
 export class CameraRig {
   readonly camera = new THREE.PerspectiveCamera(90, 1, 0.03, 1200);
-  /** Where the pilot stands in line-of-sight mode. */
+  /** Where the pilot stands in line-of-sight mode (render coordinates; the app updates it). */
   readonly pilotPos = new THREE.Vector3(0, 1.6, 4);
+  /** Ground height under a render-space (x, z), so the chase camera never dips below terrain. */
+  ground: (x: number, z: number) => number = () => 0;
   private readonly tilt = new THREE.Quaternion();
   private readonly tmp = new THREE.Vector3();
   private readonly fwd = new THREE.Vector3(0, 0, -1);
@@ -44,7 +46,7 @@ export class CameraRig {
         const lag = cam.position.distanceTo(this.target);
         const maxLag = s.chaseDistance * 0.5;
         if (lag > maxLag) cam.position.lerp(this.target, 1 - maxLag / lag);
-        cam.position.y = Math.max(cam.position.y, 0.2);
+        cam.position.y = Math.max(cam.position.y, this.ground(cam.position.x, cam.position.z) + 0.2);
         cam.lookAt(this.tmp.copy(pos).setY(pos.y + 0.15));
         break;
       }

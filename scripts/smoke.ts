@@ -2,7 +2,9 @@
  * Browser smoke test (headless Chromium, software WebGL).
  * Usage: npm run smoke   (builds, serves dist/ with vite preview, writes screenshots to smoke-out/)
  * Flies with the keyboard, then with a simulated gamepad, runs the radio
- * calibration wizard against scrambled axes, and fails on any console error.
+ * calibration wizard against scrambled axes, teleports 50 km out over the
+ * streaming terrain (floating origin), switches worlds, and fails on any
+ * console error.
  */
 import { mkdirSync } from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -36,6 +38,7 @@ await page.waitForFunction(() => (window as any).freedom);
 const state = () => page.evaluate(() => { const s = (window as any).freedom.quad.state; return { y: s.pos.y, armed: s.armed, crashed: s.crashed, z: s.pos.z, v: s.voltage }; });
 await page.screenshot({ path: `${OUT}/0-help.png` });
 await page.keyboard.press('Escape');
+const y0 = (await state()).y; // spawn pad height (terrain worlds aren't at y = 0)
 
 await page.keyboard.press('Space'); // arm
 await page.waitForTimeout(200);
@@ -108,9 +111,59 @@ await page.waitForTimeout(200);
 const wiz = await page.evaluate(() => { const f = (window as any).freedom; f.input.armSwitch; return { armed: f.quad.state.armed, mapping: f.input.gamepad.mapping, pitch: f.input.gamepad.pitch, roll: f.input.gamepad.roll, thr: f.input.gamepad.throttle }; });
 console.log('wizard', JSON.stringify({ armed: wiz.armed, pitch: wiz.pitch, roll: wiz.roll, thr: wiz.thr, thrAxis: wiz.mapping.throttle.index, arm: wiz.mapping.arm }));
 const wizardOk = wiz.armed && Math.abs(wiz.pitch - 0.5) < 1e-6 && Math.abs(wiz.roll - 0.3) < 1e-6 && wiz.thr === 0 && wiz.mapping.throttle.index === 5 && wiz.mapping.arm?.index === 4;
+// Terrain: teleport 50 km out, which needs a floating-origin rebase and fresh chunks.
+const far = await page.evaluate(() => {
+  const f = (window as any).freedom;
+  f.settings.world = { recipe: 'hills', seed: 1 };
+  f.loadWorld();
+  const x = 40000, z = -30000;
+  f.quad.reset(x, f.world.groundHeight(x, z) + 25, z, 0.8);
+  f.stepper.sync();
+  f.origin.update(x, z);
+  f.view.prime(x, z, f.origin);
+  return { origin: [f.origin.x, f.origin.z], status: f.view.worldStatus };
+});
+await page.keyboard.press('KeyG');
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${OUT}/7-far-terrain.png` });
+// Fly it forward fast for a few seconds: chunks must stream in (budgeted) without errors.
+const streamed = await page.evaluate(async () => {
+  const f = (window as any).freedom;
+  const before = f.view.worldStatus;
+  const s = f.quad.state;
+  const t0 = performance.now();
+  await new Promise<void>((res) => {
+    const tick = () => {
+      s.pos.x += 3; // ~180 m/s at 60 fps: worst case for streaming
+      s.vel.set(0, 0, 0);
+      if (performance.now() - t0 < 3000) requestAnimationFrame(tick);
+      else res();
+    };
+    tick();
+  });
+  return { before, after: f.view.worldStatus, x: s.pos.x };
+});
+await page.screenshot({ path: `${OUT}/8-streamed.png` });
+await page.keyboard.press('KeyC');
+await page.waitForTimeout(400);
+await page.screenshot({ path: `${OUT}/9-terrain-chase.png` });
+await page.keyboard.press('KeyC');
+await page.keyboard.press('KeyC');
+await page.keyboard.press('KeyG');
+const sandbox = await page.evaluate(() => {
+  const f = (window as any).freedom;
+  f.settings.world = { recipe: 'sandbox', seed: 1 };
+  f.loadWorld();
+  return f.world.id;
+});
+await page.waitForTimeout(300);
+await page.screenshot({ path: `${OUT}/10-sandbox.png` });
+console.log('terrain', JSON.stringify({ far, streamed, sandbox }));
 const fps = await page.evaluate(() => new Promise<number>((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else res(n); }; requestAnimationFrame(f); }));
 console.log(JSON.stringify({ armed, climbed, padArmed, padClimb, source, fps, errors }, null, 1));
 await browser.close();
 await server?.close();
-if (errors.length || !wizardOk || !armed.armed || climbed.y < 1 || !padArmed.armed || padClimb.y < 1 || source !== 'gamepad') process.exit(1);
+// Origin snaps to the 128 m chunk grid nearest the drone.
+const farOk = far.origin[0] === 40064 && far.origin[1] === -29952 && sandbox === 'sandbox';
+if (errors.length || !wizardOk || !farOk || !armed.armed || climbed.y - y0 < 1 || !padArmed.armed || padClimb.y - y0 < 1 || source !== 'gamepad') process.exit(1);
 console.log('SMOKE OK');

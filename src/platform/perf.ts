@@ -3,6 +3,8 @@ export class FrameStats {
   readonly frameMs: Float32Array;
   readonly physicsMs: Float32Array;
   readonly ticks: Uint16Array;
+  /** World streaming / generation time per frame, ms. */
+  readonly worldMs: Float32Array;
   index = 0;
   count = 0;
 
@@ -10,10 +12,12 @@ export class FrameStats {
     this.frameMs = new Float32Array(size);
     this.physicsMs = new Float32Array(size);
     this.ticks = new Uint16Array(size);
+    this.worldMs = new Float32Array(size);
   }
 
-  push(frameMs: number, physicsMs: number, ticks: number): void {
+  push(frameMs: number, physicsMs: number, ticks: number, worldMs = 0): void {
     const i = this.index;
+    this.worldMs[i] = worldMs;
     this.frameMs[i] = frameMs;
     this.physicsMs[i] = physicsMs;
     this.ticks[i] = ticks;

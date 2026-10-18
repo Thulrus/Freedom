@@ -5,9 +5,10 @@
 import { applyRateCurve, cloneParams, defaultSimParams, mergeParams, maxRate, RATE_PRESETS, thrustToWeight, hoverThrottle, type RateCurve, type RatePresetName, type SimParams } from '../sim';
 import { defaultSettings, type AppSettings, type StickShaping } from '../settings';
 import { downloadText, pickTextFile } from '../platform/storage';
+import { RECIPES, type WorldId } from '../world/recipes';
 import { h, type Child } from './dom';
 
-export type ChangeKind = 'sim' | 'camera' | 'input' | 'graphics' | 'touch' | 'ui';
+export type ChangeKind = 'sim' | 'camera' | 'input' | 'graphics' | 'touch' | 'ui' | 'world';
 
 export interface TuningHost {
   settings(): AppSettings;
@@ -58,6 +59,7 @@ export class TuningPanel {
     const ch = (k: ChangeKind) => () => this.host.onChange(k);
     const simCh = ch('sim');
     this.body.replaceChildren(
+      this.section('World', this.worldSection()),
       this.section('Rates', this.ratesSection()),
       this.section('PIDs', this.pidSection()),
       this.section('Flight controller', [
@@ -138,6 +140,40 @@ export class TuningPanel {
   }
 
   // ---------------------------------------------------------------- sections
+
+  private worldSection(): Child[] {
+    const w = this.host.settings().world;
+    const changed = () => {
+      this.host.onChange('world');
+      this.rebuild();
+    };
+    const recipe = RECIPES[w.recipe] ?? RECIPES.hills;
+    const seed = h('input', { type: 'number', min: 0, max: 999999, step: 1, value: w.seed, class: 'num' });
+    seed.addEventListener('change', () => {
+      const v = Math.floor(parseFloat(seed.value));
+      if (Number.isFinite(v) && v !== w.seed) {
+        w.seed = Math.max(0, v);
+        changed();
+      }
+    });
+    return [
+      this.select(
+        'World',
+        Object.values(RECIPES).map((r) => [r.id, `${r.name} (${r.category === 'training' ? 'Training' : 'Playground'})`]),
+        () => w.recipe,
+        (v) => (w.recipe = v as WorldId),
+        changed,
+      ),
+      h('div', { class: 'tune-info' }, recipe.blurb),
+      h(
+        'div',
+        { class: 'tune-row' },
+        h('label', null, 'Seed', h('span', { class: 'tune-dim' }, ' same seed = same world')),
+        h('button', { class: 'btn', onclick: () => { w.seed = Math.floor(Math.random() * 1e6); changed(); } }, 'Random'),
+        seed,
+      ),
+    ];
+  }
 
   private ratesSection(): Child[] {
     const sim = () => this.host.settings().sim;

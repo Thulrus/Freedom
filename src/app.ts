@@ -3,11 +3,12 @@
  * input -> RcChannels (per tick) -> sim (fixed 500 Hz) -> interpolated render.
  */
 import * as THREE from 'three';
-import { FixedStepper, hoverThrottle, Quad, Quat, type SimParams } from './sim';
+import { FixedStepper, hoverThrottle, Quad, Quat, Vec3, type SimParams } from './sim';
 import { InputManager } from './input/manager';
 import type { GamepadMapping } from './input/gamepad';
-import { buildSandbox, type SandboxWorld } from './world/sandbox';
+import { buildWorld, type GameWorld } from './world/recipes';
 import { SceneView } from './render/scene';
+import { FloatingOrigin } from './render/origin';
 import { DroneModel } from './render/drone';
 import { CameraRig } from './render/camera';
 import { Osd, type OsdInfo } from './ui/osd';
@@ -26,16 +27,21 @@ import { debouncedSaver } from './platform/storage';
 import type { AppSettings, CameraMode } from './settings';
 
 const SIM_HZ = 500;
+/** Main-thread time per frame for world generation, ms (chunks are built in small slices). */
+const WORLD_BUDGET_MS = 2;
 const CAMERAS: CameraMode[] = ['fpv', 'chase', 'los'];
 
 export class App {
-  readonly world: SandboxWorld;
+  world: GameWorld;
   readonly quad: Quad;
   readonly input: InputManager;
   readonly stepper: FixedStepper;
   private readonly view: SceneView;
   private readonly drone: DroneModel;
   private readonly rig = new CameraRig();
+  readonly origin = new FloatingOrigin();
+  /** Line-of-sight pilot position, world coordinates. */
+  private readonly pilot = new Vec3();
   private readonly osd = new Osd();
   private readonly debug = new DebugOverlay();
   private readonly tuning: TuningPanel;
@@ -66,14 +72,16 @@ export class App {
     private readonly ui: HTMLElement,
   ) {
     this.save = debouncedSaver('settings', () => this.settings);
-    this.world = buildSandbox(1);
+    this.world = buildWorld(settings.world.recipe, settings.world.seed);
     this.quad = new Quad(settings.sim, 1 / SIM_HZ);
     this.input = new InputManager(settings.input, settings.touch, 1 / SIM_HZ, {
       reset: () => this.reset(),
       cycleCamera: () => this.cycleCamera(),
     });
     this.stepper = new FixedStepper(this.quad, this.world, this.input.sampler);
-    this.view = new SceneView(canvas, this.world, { antialias: settings.graphics.antialias });
+    this.view = new SceneView(canvas, { antialias: settings.graphics.antialias });
+    this.view.setWorld(this.world);
+    this.rig.ground = (x, z) => this.world.groundHeight(x + this.origin.x, z + this.origin.z);
     this.drone = new DroneModel(settings.sim.quad);
     this.view.scene.add(this.drone.group, this.drone.shadow);
     this.tuning = new TuningPanel({
@@ -94,15 +102,15 @@ export class App {
     this.input.touch.hoverThrottle = hoverThrottle(settings.sim);
     this.rotateOverlay = h('div', { class: 'rotate' }, h('div', { class: 'rotate-icon' }, '⟳'), h('div', null, 'Turn your phone sideways to fly'));
     this.notice = h('div', { class: 'notice' });
-    this.osdInfo = { state: this.quad.state, mode: 'acro', armBlock: 'none', armedTime: 0, throttle: 0, cells: settings.sim.quad.battery.cells, source: '', camera: '' };
+    this.osdInfo = { state: this.quad.state, mode: 'acro', armBlock: 'none', armedTime: 0, throttle: 0, cells: settings.sim.quad.battery.cells, source: '', camera: '', homeY: 0 };
 
     ui.append(this.touchUi.root, this.osd.root, this.debug.root, this.tuning.root, this.notice, this.rotateOverlay);
     if (this.touchDevice) suppressBrowserGestures();
     this.osd.visible = settings.ui.osd;
     this.debug.visible = settings.ui.debug;
+    this.resize(); // sets the draw distance before the world is first built
     this.reset();
     this.bindEvents();
-    this.resize();
     if (!settings.ui.helpSeen) this.showHelp();
   }
 
@@ -152,13 +160,20 @@ export class App {
     this.wasArmed = s.armed;
     this.wasCrashed = s.crashed;
 
-    // Interpolate between the last two physics states.
+    // Interpolate between the last two physics states (world coordinates).
     const { prev, curr, alpha } = this.stepper;
-    const p = this.renderPos.set(
-      prev.pos.x + (curr.pos.x - prev.pos.x) * alpha,
-      prev.pos.y + (curr.pos.y - prev.pos.y) * alpha,
-      prev.pos.z + (curr.pos.z - prev.pos.z) * alpha,
-    );
+    const wx = prev.pos.x + (curr.pos.x - prev.pos.x) * alpha;
+    const wy = prev.pos.y + (curr.pos.y - prev.pos.y) * alpha;
+    const wz = prev.pos.z + (curr.pos.z - prev.pos.z) * alpha;
+    // Stream the world around the drone, then draw everything relative to the floating origin.
+    const origin = this.origin;
+    origin.update(wx, wz);
+    const t1 = performance.now();
+    this.view.update(wx, wz, origin, WORLD_BUDGET_MS);
+    const worldMs = performance.now() - t1;
+    const groundY = this.world.groundHeight(wx, wz);
+    const p = this.renderPos.set(wx - origin.x, wy, wz - origin.z);
+    this.rig.pilotPos.set(this.pilot.x - origin.x, this.pilot.y, this.pilot.z - origin.z);
     const qi = this.qInterp.slerpQuats(prev.quat, curr.quat, alpha);
     const q = this.renderQuat.set(qi.x, qi.y, qi.z, qi.w);
 
@@ -166,7 +181,7 @@ export class App {
     this.drone.group.position.copy(p);
     this.drone.group.quaternion.copy(q);
     this.drone.group.visible = cam.mode !== 'fpv';
-    this.drone.updateShadow(p.x, p.y, p.z, this.world.groundY);
+    this.drone.updateShadow(p.x, p.y, p.z, groundY);
     this.drone.updateProps(s.motorSpeed, dt);
 
     const w = this.canvas.clientWidth, hgt = this.canvas.clientHeight;
@@ -178,7 +193,7 @@ export class App {
       this.noticeUntil = 0;
     }
 
-    this.stats.push(frameMs, physMs, this.stepper.lastTicks);
+    this.stats.push(frameMs, physMs, this.stepper.lastTicks, worldMs);
     const o = this.osdInfo;
     o.mode = this.input.mode;
     o.armBlock = this.quad.armBlock;
@@ -207,6 +222,8 @@ export class App {
         pixelRatio: this.view.renderer.getPixelRatio(),
         vsyncMs: this.governor.vsync,
         quality: g.quality,
+        world: this.view.worldStatus,
+        origin,
       });
     }
   }
@@ -214,11 +231,27 @@ export class App {
   // --------------------------------------------------------------- actions
 
   reset(): void {
-    const sp = this.world.spawn;
-    this.quad.reset(sp.x, sp.y, sp.z, 0);
+    const w = this.world;
+    const sp = w.spawn;
+    this.quad.reset(sp.x, sp.y, sp.z, w.spawnYaw);
     this.stepper.sync();
     this.input.onReset();
     this.armedTime = 0;
+    // The line-of-sight pilot stands 4 m behind the pad, eyes 1.6 m above the ground.
+    const px = sp.x + 4 * Math.sin(w.spawnYaw), pz = sp.z + 4 * Math.cos(w.spawnYaw);
+    this.pilot.set(px, w.groundHeight(px, pz) + 1.6, pz);
+    this.osdInfo.homeY = this.quad.state.pos.y;
+    this.origin.update(sp.x, sp.z);
+    this.view.prime(sp.x, sp.z, this.origin);
+  }
+
+  /** Build the world in settings.world and put the quad on its launch pad. */
+  loadWorld(): void {
+    this.world = buildWorld(this.settings.world.recipe, this.settings.world.seed);
+    this.stepper.world = this.world;
+    this.origin.reset();
+    this.view.setWorld(this.world);
+    this.reset();
   }
 
   private showNotice(text: string): void {
@@ -254,6 +287,7 @@ export class App {
       this.debug.visible = this.settings.ui.debug;
       this.osd.visible = this.settings.ui.osd;
     }
+    if (kind === 'world') this.loadWorld();
     if (kind === 'graphics') {
       this.governor.reset();
       this.resize();

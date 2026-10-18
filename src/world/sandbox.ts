@@ -3,7 +3,8 @@
  * a loop of gates). Rendering and collision both read the same box list, so
  * what you see is what you hit.
  */
-import { Rng, Vec3, type Hit, type WorldQuery } from '../sim';
+import { Rng, Vec3, type Hit } from '../sim';
+import type { GameWorld } from './recipes';
 
 export type BoxKind = 'pillar' | 'building' | 'gate';
 
@@ -36,7 +37,9 @@ export interface GateDef {
 
 const STRIDE = 9; // cx cy cz hx hy hz cos sin boundRadius
 
-export class SandboxWorld implements WorldQuery {
+export class SandboxWorld implements GameWorld {
+  readonly id = 'sandbox' as const;
+  readonly spawnYaw = 0;
   readonly groundY = 0;
   readonly boxes: BoxDef[];
   readonly gates: GateDef[];
@@ -45,7 +48,11 @@ export class SandboxWorld implements WorldQuery {
   private readonly tmp = new Vec3();
   private readonly hit: Hit = { distance: 0, point: new Vec3(), normal: new Vec3() };
 
-  constructor(boxes: BoxDef[], gates: GateDef[]) {
+  constructor(
+    boxes: BoxDef[],
+    gates: GateDef[],
+    readonly seed = 1,
+  ) {
     this.boxes = boxes;
     this.gates = gates;
     this.data = new Float64Array(boxes.length * STRIDE);
@@ -79,6 +86,10 @@ export class SandboxWorld implements WorldQuery {
       if (dist < best) best = dist;
     }
     return best;
+  }
+
+  groundHeight(): number {
+    return this.groundY;
   }
 
   /** Gradient of the distance field by central differences. */
@@ -182,5 +193,5 @@ export function buildSandbox(seed = 1): SandboxWorld {
     n++;
   }
 
-  return new SandboxWorld(boxes, gates);
+  return new SandboxWorld(boxes, gates, seed);
 }

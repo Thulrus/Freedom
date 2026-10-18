@@ -46,7 +46,7 @@ export function helpPanel(touch: boolean, onClose: () => void): HTMLElement {
         row('1 / 2 / 3', 'Acro / Angle / Horizon'),
         row('C', 'Camera: FPV → chase → line of sight'),
         row('R', 'Reset to the launch pad'),
-        row('T', 'Tuning panel (rates, PIDs, physics, camera, JSON)'),
+        row('T', 'Tuning panel (world & seed, rates, PIDs, physics, camera, JSON)'),
         row('G', 'Debug overlay'),
         row('O', 'Toggle OSD'),
         row('Gamepad', 'Start: arm · Y: mode · Back: reset · LB: camera. Radios: run "Set up controller" in the tuning panel.'),

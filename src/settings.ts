@@ -4,6 +4,7 @@
  */
 import { defaultSimParams, mergeParams, type SimParams } from './sim';
 import type { GamepadMapping } from './input/gamepad';
+import type { WorldId } from './world/recipes';
 
 export type CameraMode = 'fpv' | 'chase' | 'los';
 
@@ -81,9 +82,17 @@ export interface TouchSettings {
   shaping: { roll: StickShaping; pitch: StickShaping; yaw: StickShaping; throttle: StickShaping };
 }
 
+export interface WorldSettings {
+  /** World recipe (see world/recipes.ts). */
+  recipe: WorldId;
+  /** Same seed = same world. */
+  seed: number;
+}
+
 export interface AppSettings {
   version: 1;
   sim: SimParams;
+  world: WorldSettings;
   camera: CameraSettings;
   input: InputSettings;
   graphics: GraphicsSettings;
@@ -97,6 +106,7 @@ export function defaultSettings(): AppSettings {
   return {
     version: 1,
     sim: defaultSimParams(),
+    world: { recipe: 'hills', seed: 1 },
     camera: { mode: 'fpv', fpvTilt: 30, fpvFov: 120, chaseDistance: 2.2, chaseHeight: 0.7, losFov: 50 },
     input: {
       shaping: { roll: noShaping(), pitch: noShaping(), yaw: noShaping(), throttle: { deadzone: 0, expo: 0, sensitivity: 1 } },

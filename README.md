@@ -4,7 +4,7 @@
 
 A browser FPV drone simulator, mobile-first, for practicing real acro flying. It uses procedurally generated worlds. It is static files only, with no backend. The full spec is in [`docs/SPEC.md`](docs/SPEC.md).
 
-**Status: Milestone 3 (mobile touch + performance baseline) is built.** It still needs checking on a real Android phone and an iPhone; see [`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md). M2 still needs a hands-on check with a real radio or gamepad. You can fly with a keyboard, a gamepad, or a radio in USB joystick mode. Touch controls and the PWA come in M3. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
+**Status: Milestone 4 (streaming procedural terrain) is built.** You fly over endless, seeded rolling hills with lakes, forests and mountains by default; the M2 sandbox (pillars and a gate loop) is still available. M3 still needs checking on a real Android phone and an iPhone (see [`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md)), and M2 needs a hands-on check with a real radio or gamepad. You can fly with touch, a keyboard, a gamepad, or a radio in USB joystick mode. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
 
 ## Quick start
 
@@ -49,8 +49,8 @@ Keyboard flight is for testing only. Use a radio or gamepad for real practice.
 src/
   sim/       PURE TypeScript physics + flight controller. No DOM, no Three.js.
   input/     Keyboard, Gamepad API (gamepads + radios), stick shaping -> RcChannels
-  world/     Worlds as WorldQuery (M2: sandbox with ground, pillars, buildings, gates)
-  render/    Three.js scene, drone model, FPV/chase/LOS camera rig
+  world/     Worlds as WorldQuery: recipes, seeded noise, streaming terrain + chunk streamer, M2 sandbox
+  render/    Three.js scene, per-world views, floating origin, drone model, FPV/chase/LOS camera rig
   ui/        OSD, tuning panel, debug overlay, controller setup, help
   platform/  Storage, frame stats, dynamic resolution, latency meter, fullscreen/orientation, PWA
   app.ts     Wires the loop: input -> fixed-step sim -> interpolated render
@@ -77,7 +77,7 @@ input → RcChannels (sampled every physics tick) → Quad.step(dt) → QuadStat
   - PID + feedforward then works on angular rate, with D on measurement, I-term relax and anti-windup.
   - Angle and Horizon modes add self-leveling. It uses the shortest rotation, so Angle mode also recovers from inverted.
 - **`Mixer`** derives quad-X factors from motor geometry and desaturates in airmode style, like BF `mixer.c`.
-- **`WorldQuery`** is the only thing the physics knows about the world: signed `distance()`, `normal()` and optional `raycast()`. Collision is a sphere against that distance. The M2 sandbox uses the same box list for rendering and collision, so what you see is what you hit.
+- **`WorldQuery`** is the only thing the physics knows about the world: signed `distance()`, `normal()` and optional `raycast()`. Collision is a sphere against that distance. Every world renders from the same data it collides with, so what you see is what you hit (see Worlds below).
 - **Zero allocation per tick**, verified with V8's sampling heap profiler (`alloc.test.ts`).
 - **Deterministic**: the same params and inputs give a bit-identical trajectory.
 
@@ -86,6 +86,25 @@ input → RcChannels (sampled every physics tick) → Quad.step(dt) → QuadStat
 - World: right-handed, **+Y up**, matching Three.js. Body: **+X right, +Y up (thrust), −Z forward**.
 - `RcChannels`: `throttle` is 0..1. `roll`, `pitch` and `yaw` are −1..1. Positive means stick right or stick forward: roll right, nose down, yaw right.
 - Motor order is Betaflight's: 1 rear-right, 2 front-right, 3 rear-left, 4 front-left. Spin directions are "props in".
+
+## Worlds
+
+Pick a world and seed in **T → World**. The same seed always gives the same world.
+
+| world | category | what it is |
+|---|---|---|
+| Rolling hills (default) | Training | Endless seeded terrain: hills, lakes, forests, boulders, ridged mountains with rock and snow. |
+| Sandbox | Training | The M2 test field: flat ground, pillars, buildings, an 8-gate loop. |
+
+Training worlds always use real Earth physics. Worlds that change physics will be labelled "Playground".
+
+How the terrain works (`src/world/`):
+
+- **Height function** (`terrain.ts`): three layers of seeded gradient-noise fBm (`noise.ts`): continents/lakes, rolling hills, and ridged mountains masked to the high ground. Lakes are flat, solid water at y = 0. The launch pad at the origin is flattened and kept clear of trees.
+- **Collision is the mesh.** The collision surface is the triangulated 2 m height grid, with the same vertices and the same triangle split as the finest (LOD 0) mesh, which always covers the chunks around the drone. Trees (cone or sphere crown on a trunk) and boulders are placed by one deterministic function per 8 m cell, shared by rendering and collision.
+- **Streaming** (`chunks.ts`): 128 m chunks in rings around the drone: LOD 0 (2 m grid) for the 3×3 chunks nearest, then 4 m, 8 m and 16 m out to the draw distance, with skirts to hide LOD cracks. Chunks are built in small slices (one row per slice, each well under 0.2 ms on a desktop) within a **2 ms per-frame budget**. Mesh buffers and chunk records are pooled, so memory stays flat no matter how far you fly.
+- **Floating origin** (`render/origin.ts`): everything is drawn relative to an origin that jumps (in whole chunks) whenever the camera is more than 1 km from it, so float32 GPU precision never causes jitter. Physics stays in double-precision world coordinates.
+- **Zero allocation in physics**: the terrain query follows the sim's rules (doubles cross calls through typed arrays), and the allocation test covers 125k ticks of skimming the ground through a forest.
 
 ## Tuning parameters
 
@@ -145,6 +164,7 @@ These are saved in localStorage under `freedom.settings` and edited in the tunin
 
 | setting | unit | default |
 |---|---|---|
+| `world.recipe`, `world.seed` | –, integer | `hills`, 1 |
 | `camera.fpvTilt` | deg | 30 |
 | `camera.fpvFov` | deg, screen diagonal | 120 |
 | `camera.chaseDistance`, `chaseHeight` | m | 2.2, 0.7 |

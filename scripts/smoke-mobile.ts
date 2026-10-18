@@ -63,7 +63,7 @@ check(during.src === 'touch', `input source is touch (${during.src})`);
 check(during.thr > 0.6 && during.thr < 0.8, `throttle follows the left thumb (${during.thr.toFixed(2)})`);
 check(during.roll > 0.05, `roll follows the right thumb (${during.roll.toFixed(2)})`);
 await page.waitForTimeout(900);
-const alt = await app<number>('f.quad.state.pos.y');
+const alt = await app<number>('f.quad.state.pos.y - f.world.spawn.y'); // above the launch pad
 check(alt > 2, `quad climbs on touch throttle (${alt.toFixed(1)} m)`);
 await page.screenshot({ path: `${OUT}/mobile-1-flying.png` });
 

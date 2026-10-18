@@ -167,6 +167,80 @@ The spec's `WorldQuery.distance()` returns a number. With a single monomorphic w
 - Do the default stick size and position suit your thumbs? Do you prefer fixed or floating?
 - Is the default touch expo (0.2) right for you?
 
-## Next: M4 — Streaming procedural terrain
+## M4 — Streaming procedural terrain (built; needs a long real-device flight)
 
-Seeded chunked heightfield world, stylized shading, fog, floating origin, collision via `WorldQuery`. Acceptance: fly one direction for 10+ minutes with no hitches, no float jitter, no memory growth; deterministic by seed.
+### What exists
+
+- **World recipes** (`world/recipes.ts`): a recipe bundles a generator, terrain and sky palettes, and a category (Training or Playground). Pick a recipe and seed in T → World; both persist. **Rolling hills** is the new default, and the M2 sandbox is still there. Physics only ever sees `WorldQuery`. Neither the sim nor the physics params changed.
+- **Terrain** (`world/terrain.ts`, `world/noise.ts`):
+  - Seeded gradient-noise fBm in three layers: continents and lakes, rolling hills, and ridged mountains masked to the high ground.
+  - Lakes are flat, solid water. The launch pad is flattened and kept clear of props.
+  - Vertex colors: water depth, beach, two grasses, rock on steep slopes, and snow up high.
+- **What you see is what you hit.** Collision uses the triangulated 2 m grid, with exactly the vertices and triangle split of the LOD 0 mesh. A test checks the mesh against collision to float32 precision. Trees (pine: cone on a trunk; broadleaf: sphere on a trunk) and boulders come from one deterministic function per 8 m cell, and rendering and collision both call it. Collision uses true signed distances to cone, sphere and capsule shapes, and every rendered prop is checked to be solid.
+- **Streaming** (`world/chunks.ts`):
+  - Rings of 128 m chunks: the 3×3 nearest at 2 m, then 4, 8 and 16 m spacing out to the draw distance, with 16 m of hysteresis.
+  - Skirts hide cracks between chunks and LODs.
+  - Generation is sliced into rows (each slice < 0.2 ms on a desktop) under a 2 ms per-frame budget. Chunks with nothing on screen go first, then the nearest.
+  - The old mesh stays on screen until its replacement is ready, so nothing ever flickers.
+  - Mesh buffers, chunk records and jobs are all pooled.
+- **Rendering** (`render/terrainView.ts`):
+  - One draw call per chunk: smooth-shaded, vertex-colored, with a shared material and per-LOD index buffers.
+  - Faceted low-poly props: three instanced meshes, repacked only when the chunk set changes.
+- **Smooth normals, deliberately.** I started with flat shading (derivative normals). Neighbouring chunks leave float32 hairline cracks, and the skirts filling them were lit as vertical walls, so faint dotted seams showed. Normals are now taken from a height grid with a one-vertex border, so they match exactly across chunk edges, and skirts copy the edge's normal and color. This also avoids derivative-normal noise on mobile GPUs.
+- **Floating origin** (`render/origin.ts`): rendering is relative to an origin that jumps in whole chunks whenever the camera is more than 1 km away. Physics stays in doubles.
+- **Cameras and OSD**:
+  - The chase camera stays above the terrain.
+  - The line-of-sight pilot stands on the ground behind the pad.
+  - The blob shadow sits on the terrain.
+  - The OSD altitude is now relative to the launch pad, like Betaflight's baro altitude zeroed at arming.
+- **Debug overlay**: a world line (chunks, queue, props, gen ms per frame and peak, builds, pool size), the origin and rebase count, and world-gen time drawn in purple in the frame graph.
+
+### Testing
+
+- 86 unit tests. New in M4:
+  - determinism by seed
+  - sane terrain statistics
+  - a flat, dry, clear spawn for several seeds
+  - mesh = collision
+  - every prop solid
+  - raycasts
+  - a quad resting on a slope
+  - floating origin on a 50 km flight
+  - a teleport not growing the pools
+  - **a 12-minute flight at 40 m/s (28.8 km) in one direction**: never a missing LOD 0 chunk under the drone, pools frozen after minute 3, about 90 active chunks, work p99 2.0 ms (the budget)
+- **Zero allocation over terrain**: a second allocation test skims the ground through a forest for 125k ticks.
+- `npm run smoke` now also teleports 50 km out (origin rebases), streams while moving about 180 m/s, switches to the sandbox, and checks for console errors. `smoke:mobile` checks that the climb is above the pad, not above y = 0.
+
+### Zero-allocation lessons, part 2
+
+The prop cache refills only when the drone crosses an 8 m cell, a few times a second. Two things made that path allocate:
+
+1. **Cold code isn't optimized.** V8 never compiled it on its own, and unoptimized code boxes every double. `TerrainWorld` now exercises it about 800 times in its constructor (a few ms) so it is compiled before the first flight.
+2. **A tiny helper took a double** (`smooth01(x)`) and wasn't inlined into the refill, so every call boxed its argument. Smoothsteps on the query path are now written out inline.
+
+Probing `distance()` in isolation showed neither problem, because the probe crossed cells hundreds of times a second. Only the realistic flight in the allocation test caught it.
+
+### Performance (measured so far)
+
+- Desktop Node: an LOD 0 chunk takes about 2–3 ms to build in total, and every slice is < 0.2 ms. A world builds (including the JIT warm-up) in 1–12 ms. The first full prime at spawn (about 90 chunks) takes roughly 50 ms in software-rendered Chromium.
+- Bundle: 171 kB gzipped (+15 kB for M4).
+- Scene, estimated for the High preset (600 m): about 90 chunks before frustum culling, about 140k terrain triangles before culling, about 1.8k props, and roughly 40–60 draw calls after culling. Low (280 m) is much less.
+- **Not yet measured on a real phone.** Each slice should be under 1 ms even on a slow phone, but please check the debug overlay's `world gen … peak` and fps during a long fast flight.
+
+### Known limitations / deferred
+
+- Props draw out to about 450 m (ring 3) and then rely on fog. There are no impostors.
+- LOD switches can pop slightly at 260–520 m. There is no geomorphing yet.
+- Generation runs on the main thread. Slicing keeps it within budget; a Worker remains an option if phones show hitches.
+- Water is opaque and flat-colored, with no shader yet.
+- `raycast` on terrain is a conservative march (4 m steps max, then bisection). That's fine for gates and cameras; it is not used by physics.
+
+### Feedback wanted (M4)
+
+- **Does the terrain read well in FPV** at speed? Is it a good scale for a 5"? Trees are 5–13 m and forests have clearings.
+- **Tree density** for proximity flying: too sparse or too dense?
+- On a phone: the overlay's fps, `world gen` peak and draw calls on High and Low after a 10-minute flight in one direction.
+
+## Next: M5 — Game modes (first pass)
+
+Gate courses with timing, a few training drills, replay/ghost and a telemetry view. Acceptance: a complete loop of picking a world, flying a drill, seeing the score, and watching the replay.

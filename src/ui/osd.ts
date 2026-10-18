@@ -11,6 +11,8 @@ export interface OsdInfo {
   cells: number;
   source: string;
   camera: string;
+  /** Height the altitude readout is relative to (the launch pad, like a baro zeroed at arming), m. */
+  homeY: number;
 }
 
 export class Osd {
@@ -50,7 +52,7 @@ export class Osd {
     setText(e.cell, `${cell.toFixed(2)}V/c`);
     e.cell.classList.toggle('osd-alert', cell < 3.5);
     setText(e.amps, `${s.current.toFixed(0)}A`);
-    setText(e.alt, `ALT ${(s.pos.y - 0.12).toFixed(1)}m`);
+    setText(e.alt, `ALT ${(s.pos.y - o.homeY).toFixed(1)}m`);
     setText(e.spd, `SPD ${(s.vel.length() * 3.6).toFixed(0)}km/h`);
     const t = Math.floor(o.armedTime);
     setText(e.timer, `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`);

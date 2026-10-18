@@ -1,81 +1,94 @@
 /**
- * Stylized scene: gradient sky, linear fog, procedural grid ground that
- * follows the camera, and the world's boxes in one instanced draw call.
+ * Stylized scene: gradient sky, linear fog, lights, and the current world's
+ * view (sandbox or streaming terrain). Everything is drawn relative to the
+ * floating origin.
  */
 import * as THREE from 'three';
-import type { SandboxWorld } from '../world/sandbox';
-
-export const PALETTE = {
-  zenith: new THREE.Color(0x3d6fb6),
-  horizon: new THREE.Color(0xbfd6e6),
-  sun: new THREE.Color(0xfff1c9),
-  ground: new THREE.Color(0x7fa86a),
-  groundAlt: new THREE.Color(0x8db474),
-  gridMinor: new THREE.Color(0x5f8a52),
-  gridMajor: new THREE.Color(0xe9f0d8),
-};
+import { RECIPES, type GameWorld } from '../world/recipes';
+import type { FloatingOrigin } from './origin';
+import { createWorldView, type WorldView } from './worldView';
 
 const SUN_DIR = new THREE.Vector3(-0.4, 0.55, -0.7).normalize();
 
 export class SceneView {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  private readonly ground: THREE.Mesh;
   private readonly sky: THREE.Mesh;
+  private readonly skyUniforms: { uZenith: { value: THREE.Color }; uHorizon: { value: THREE.Color }; uSun: { value: THREE.Color } };
+  private readonly fogColor = new THREE.Color();
+  private view: WorldView | null = null;
+  private drawDistance = 600;
 
-  constructor(canvas: HTMLCanvasElement, world: SandboxWorld, opts: { antialias: boolean }) {
+  constructor(canvas: HTMLCanvasElement, opts: { antialias: boolean }) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: opts.antialias, powerPreference: 'high-performance' });
     this.renderer.info.autoReset = false; // we reset per frame so the debug overlay sees totals
-    this.scene.fog = new THREE.Fog(PALETTE.horizon, 80, 600);
-    this.scene.background = PALETTE.horizon;
+    this.scene.fog = new THREE.Fog(this.fogColor, 80, 600);
+    this.scene.background = this.fogColor;
 
     this.scene.add(new THREE.HemisphereLight(0xe4eeff, 0x6f7f5c, 3.2));
     const sun = new THREE.DirectionalLight(0xfff4e0, 2.6);
     sun.position.copy(SUN_DIR);
     this.scene.add(sun);
 
-    this.sky = makeSky();
+    this.skyUniforms = { uZenith: { value: new THREE.Color() }, uHorizon: { value: this.fogColor }, uSun: { value: new THREE.Color() } };
+    this.sky = makeSky(this.skyUniforms);
     this.scene.add(this.sky);
-    this.ground = makeGround();
-    this.scene.add(this.ground);
-    this.scene.add(makeBoxes(world));
   }
 
-  /** Fog end and camera far plane follow the quality preset's draw distance. */
+  /** Swap in the renderer for a new world (disposes the old one). */
+  setWorld(world: GameWorld): void {
+    if (this.view) {
+      this.scene.remove(this.view.object);
+      this.view.dispose();
+    }
+    const sky = RECIPES[world.id].sky;
+    this.skyUniforms.uZenith.value.setHex(sky.zenith);
+    this.skyUniforms.uSun.value.setHex(sky.sun);
+    this.fogColor.setHex(sky.horizon);
+    (this.scene.fog as THREE.Fog).color = this.fogColor;
+    this.view = createWorldView(world);
+    this.view.setDrawDistance(this.drawDistance);
+    this.scene.add(this.view.object);
+  }
+
+  /** Fog end, camera far plane and world streaming radius follow the quality preset's draw distance. */
   setDrawDistance(d: number, camera: THREE.PerspectiveCamera): void {
+    this.drawDistance = d;
     const fog = this.scene.fog as THREE.Fog;
     fog.near = d * 0.13;
     fog.far = d;
     camera.far = d * 1.5;
     camera.updateProjectionMatrix();
+    this.view?.setDrawDistance(d);
   }
 
-  /** Keep ground and sky centered on the camera (they are effectively infinite). */
-  follow(camera: THREE.Camera): void {
-    const p = camera.position;
-    // Snap to the major grid so the pattern doesn't swim.
-    this.ground.position.set(Math.round(p.x / 100) * 100, 0, Math.round(p.z / 100) * 100);
-    this.sky.position.copy(p);
+  /** Stream the world around the focus (world coordinates) within budgetMs. */
+  update(focusX: number, focusZ: number, origin: FloatingOrigin, budgetMs: number): void {
+    this.view?.update(focusX, focusZ, origin, budgetMs);
+  }
+
+  /** Build everything around the focus right away (world load, reset). */
+  prime(focusX: number, focusZ: number, origin: FloatingOrigin): void {
+    this.view?.prime?.(focusX, focusZ, origin);
+  }
+
+  get worldStatus(): string {
+    return this.view?.status() ?? '';
   }
 
   render(camera: THREE.Camera): void {
-    this.follow(camera);
+    this.sky.position.copy(camera.position);
     this.renderer.info.reset();
     this.renderer.render(this.scene, camera);
   }
 }
 
-function makeSky(): THREE.Mesh {
+function makeSky(uniforms: Record<string, { value: unknown }>): THREE.Mesh {
   const mat = new THREE.ShaderMaterial({
     side: THREE.BackSide,
     depthWrite: false,
     fog: false,
-    uniforms: {
-      uZenith: { value: PALETTE.zenith },
-      uHorizon: { value: PALETTE.horizon },
-      uSun: { value: PALETTE.sun },
-      uSunDir: { value: SUN_DIR },
-    },
+    uniforms: { ...uniforms, uSunDir: { value: SUN_DIR } },
     vertexShader: /* glsl */ `
       varying vec3 vDir;
       void main() {
@@ -99,82 +112,5 @@ function makeSky(): THREE.Mesh {
   const mesh = new THREE.Mesh(new THREE.SphereGeometry(900, 32, 16), mat);
   mesh.renderOrder = -1;
   mesh.frustumCulled = false;
-  return mesh;
-}
-
-function makeGround(): THREE.Mesh {
-  const mat = new THREE.ShaderMaterial({
-    fog: true,
-    uniforms: THREE.UniformsUtils.merge([
-      THREE.UniformsLib.fog,
-      {
-        uBase: { value: PALETTE.ground },
-        uAlt: { value: PALETTE.groundAlt },
-        uMinor: { value: PALETTE.gridMinor },
-        uMajor: { value: PALETTE.gridMajor },
-      },
-    ]),
-    vertexShader: /* glsl */ `
-      #include <fog_pars_vertex>
-      varying vec3 vWorld;
-      void main() {
-        vec4 wp = modelMatrix * vec4(position, 1.0);
-        vWorld = wp.xyz;
-        vec4 mvPosition = viewMatrix * wp;
-        gl_Position = projectionMatrix * mvPosition;
-        #include <fog_vertex>
-      }`,
-    fragmentShader: /* glsl */ `
-      #include <common>
-      #include <fog_pars_fragment>
-      uniform vec3 uBase, uAlt, uMinor, uMajor;
-      varying vec3 vWorld;
-      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-      float grid(vec2 p, float spacing, float width) {
-        vec2 q = p / spacing;
-        vec2 fw = fwidth(q);
-        vec2 g = abs(fract(q - 0.5) - 0.5) / max(fw, 1e-4);
-        float line = 1.0 - min(min(g.x, g.y) / width, 1.0);
-        // Fade lines out where they get denser than a pixel (no moire).
-        return line * (1.0 - smoothstep(0.15, 0.6, max(fw.x, fw.y)));
-      }
-      void main() {
-        vec2 p = vWorld.xz;
-        // Large field patches for a stylized patchwork look.
-        float field = hash(floor(p / 40.0));
-        vec3 c = mix(uBase, uAlt, step(0.5, field) * 0.8 + field * 0.2);
-        c = mix(c, uMinor, grid(p, 2.0, 1.0) * 0.5);
-        c = mix(c, uMajor, grid(p, 20.0, 1.4) * 0.55);
-        // Launch pad ring at the origin.
-        float r = length(p);
-        c = mix(c, vec3(0.95, 0.95, 0.9), (1.0 - smoothstep(0.05, 0.12, abs(r - 1.6))) * 0.9);
-        gl_FragColor = vec4(c, 1.0);
-        #include <colorspace_fragment>
-        #include <fog_fragment>
-      }`,
-  });
-  const geo = new THREE.PlaneGeometry(2400, 2400);
-  geo.rotateX(-Math.PI / 2);
-  const mesh = new THREE.Mesh(geo, mat);
-  mesh.frustumCulled = false;
-  return mesh;
-}
-
-function makeBoxes(world: SandboxWorld): THREE.InstancedMesh {
-  const geo = new THREE.BoxGeometry(1, 1, 1);
-  const mat = new THREE.MeshLambertMaterial({ flatShading: true });
-  const mesh = new THREE.InstancedMesh(geo, mat, world.boxes.length);
-  const m = new THREE.Matrix4();
-  const q = new THREE.Quaternion();
-  const pos = new THREE.Vector3();
-  const scale = new THREE.Vector3();
-  const color = new THREE.Color();
-  world.boxes.forEach((b, i) => {
-    q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), b.yaw);
-    m.compose(pos.set(b.cx, b.cy, b.cz), q, scale.set(b.hx * 2, b.hy * 2, b.hz * 2));
-    mesh.setMatrixAt(i, m);
-    mesh.setColorAt(i, color.setHex(b.color));
-  });
-  mesh.computeBoundingSphere();
   return mesh;
 }

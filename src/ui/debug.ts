@@ -1,5 +1,6 @@
 /** Debug overlay: frame-time graph, physics cost, renderer counters, stick inputs. */
 import type { FrameStats } from '../platform/perf';
+import type { FloatingOrigin } from '../render/origin';
 import { h, setText } from './dom';
 
 export interface DebugInfo {
@@ -19,6 +20,9 @@ export interface DebugInfo {
   pixelRatio: number;
   vsyncMs: number;
   quality: string;
+  /** World streaming status (chunks, props, generation time). */
+  world: string;
+  origin: FloatingOrigin;
 }
 
 const W = 240, H = 70;
@@ -70,6 +74,8 @@ export class DebugOverlay {
         `res   ${d.quality} · scale ${d.renderScale.toFixed(2)} · dpr ${d.pixelRatio.toFixed(2)} · vsync ${(1000 / d.vsyncMs).toFixed(0)} Hz`,
         d.latency ? `input→sim ${d.latency.avg.toFixed(1)} ms avg, ${d.latency.p95.toFixed(1)} p95 (+~1 frame to screen)` : 'input→sim  (touch or press a key)',
         d.inputLatencyMs !== null ? `gamepad sample age ${d.inputLatencyMs.toFixed(1)} ms` : '',
+        d.world,
+        `origin ${d.origin.x.toFixed(0)}, ${d.origin.z.toFixed(0)} (${d.origin.rebases} rebases)`,
       ].join('\n'),
     );
   }
@@ -89,11 +95,13 @@ export class DebugOverlay {
     for (let k = 0; k < n; k++) {
       const i = (st.index - n + k + st.size) % st.size;
       const x = W - n + k;
-      const fm = st.frameMs[i], pm = st.physicsMs[i];
+      const fm = st.frameMs[i], pm = st.physicsMs[i], wm = st.worldMs[i];
       g.fillStyle = fm > 20 ? '#ff5a36' : '#7fd36b';
       g.fillRect(x, H - fm * scale, 1, fm * scale);
       g.fillStyle = '#4aa3ff';
       g.fillRect(x, H - pm * scale, 1, pm * scale);
+      g.fillStyle = '#d58cff';
+      g.fillRect(x, H - (pm + wm) * scale, 1, wm * scale);
     }
   }
 
