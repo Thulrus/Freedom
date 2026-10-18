@@ -60,12 +60,63 @@ The spec's `WorldQuery.distance()` returns a number. With a single monomorphic w
 - **Quick rates `rcRate` scaling.** I used BF's `rcRate × 200` deg/s at center. Please confirm it matches what Configurator shows.
 - **Crash threshold.** 6 m/s normal impact speed disarms. That may be too forgiving or too harsh.
 
-## Next: M2 — Flyable sandbox (desktop first)
+## M2 — Flyable sandbox, desktop first (built; needs a hands-on check)
 
-Planned:
-- Three.js scene with a flat ground grid, FPV and chase cameras, and an OSD.
-- Keyboard and Gamepad input.
-- A tuning panel bound to `SimParams`, with JSON import/export.
-- A debug overlay.
+### What exists
 
-Three.js is the one new runtime dependency the spec already approves.
+- **Loop** (`app.ts`): each frame polls the gamepad once, then `FixedStepper` runs whole 500 Hz ticks and samples input every tick. The renderer interpolates position (lerp) and attitude (slerp) between the last two physics states. Physics pauses while a dialog is open.
+- **Input** (`input/`):
+  - Keyboard virtual sticks: slew-limited, non-centering throttle.
+  - Gamepad API with explicit per-channel mapping: axis, min/center/max calibration, invert. Arm and mode can be an axis switch or a button.
+  - Per-stick deadzone, expo and sensitivity.
+  - Calibration wizard: "throttle up, roll right, …". It detects axis index, direction and range on any device, plus the arm and mode switches.
+  - Failsafes: a hidden tab disarms; window blur releases held keys.
+- **World** (`world/sandbox.ts`): seeded ground plus pillars, buildings and an 8-gate loop. The first gate is straight ahead of spawn. Signed distance per box, normals by central differences, sphere-traced raycast. Rendering and collision read the same box list.
+- **Render** (`render/`):
+  - Gradient sky with sun, linear fog, and a procedural grid/patchwork ground shader that follows the camera.
+  - All boxes in a single instanced draw call.
+  - Low-poly 5" model with spinning prop discs and a blob shadow.
+  - Cameras: FPV (uptilt, diagonal FOV), chase (smoothed, lag-capped) and line of sight (fixed pilot position).
+- **UI** (`ui/`):
+  - Betaflight-style OSD: mode, armed state, voltage and per-cell voltage, current, altitude, speed, armed timer, throttle, and warnings for throttle-high, crash and low battery.
+  - Tuning panel covering every sim parameter: rates per axis with type switch and curve preview, presets, the PID table, filters, airframe, battery, crashes, wind, camera, input shaping and graphics. JSON can be shown, copied, downloaded, imported from paste or file, or reset.
+  - Debug overlay: frame and physics time graph, fps, draw calls, triangles, dropped ticks, gyro vs setpoint, motor outputs, stick visualization, gamepad sample age.
+  - Help screen with a clear note that a radio or gamepad is recommended.
+- **Persistence**: all settings, including per-device controller mappings, are saved in localStorage. Settings are merged over defaults on load, so old or partial saves still work.
+
+### Testing
+
+- 63 Vitest tests. New in M2:
+  - stick shaping
+  - keyboard slew
+  - gamepad normalization and calibration detection
+  - sandbox signed distance, normals, raycast and seed determinism
+  - collision with a rotated pillar
+  - FOV conversion
+  - rate-type conversion
+  - settings merge
+  - layer-boundary checks: `world/` and `input/` never import rendering or UI
+- `npm run smoke` runs a headless Chromium test with software WebGL. It flies with the keyboard and then with a simulated gamepad, runs the calibration wizard against a "radio" with scrambled and reversed axes, screenshots every camera and panel, and fails on any console error. It already caught one bug: `patch` is a reserved word in GLSL.
+
+### Performance (measured so far)
+
+- Physics costs about 0.1–0.2 ms per frame for roughly 8 ticks.
+- The scene is about 3–10 draw calls and about 2k triangles.
+- The bundle is 155 kB gzipped, mostly three.js.
+- **Not yet measured on a real GPU.** The headless test uses software rendering at about 15–20 fps, which says nothing about real fps. The M2 acceptance "stable 60 fps on desktop" needs checking on your machine: open the debug overlay with G.
+
+### Input latency notes
+
+- The browser refreshes gamepad state about once per frame, so gamepad input effectively reaches the sim once per frame. Every tick in that frame uses the newest sample. The debug overlay shows the sample age.
+- Lowering latency further means decoupling physics from `requestAnimationFrame`. That's an M3 topic, to be measured before changing anything.
+
+### Feedback wanted (M2)
+
+- **Feel with your radio**: rates, PIDs, motor response, drag. Everything is in T → tuning, and "Copy" gives a JSON you can send back.
+- **Did the calibration wizard work** with your radio's USB joystick mode? Which radio and firmware?
+- **FPV defaults**: 30° uptilt and 120° diagonal FOV. Is that a good starting point?
+- **Frame rate** on your desktop and browser (G overlay).
+
+## Next: M3 — Mobile touch and performance baseline
+
+Touch sticks with full settings, PWA (manifest, service worker, offline), landscape and fullscreen, safe areas, gesture suppression, dynamic resolution and quality presets, and latency measurement.

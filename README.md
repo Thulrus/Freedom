@@ -2,30 +2,58 @@
 
 A browser FPV drone simulator, mobile-first, for practicing real acro flying. It uses procedurally generated worlds. It is static files only, with no backend. The full spec is in [`docs/SPEC.md`](docs/SPEC.md).
 
-**Status: Milestone 1 (headless physics core) is complete.** There is no renderer yet. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
+**Status: Milestone 2 (flyable desktop sandbox) is built. It still needs a hands-on check with a real radio or gamepad on real hardware.** You can fly with a keyboard, a gamepad, or a radio in USB joystick mode. Touch controls and the PWA come in M3. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
 
 ## Quick start
 
 ```bash
 npm install
-npm test          # headless sim test suite (Vitest, Node)
+npm run dev       # open the printed URL and fly
+npm test          # headless test suite (Vitest, Node)
 npm run typecheck # whole project + sim/ checked with NO DOM types
+npm run smoke     # build + headless-browser flight test, screenshots in smoke-out/
 npm run plots     # writes step-response plots to docs/plots/*.svg
-npm run dev       # Vite dev server (M1: placeholder page that runs the sim)
 ```
+
+## Flying
+
+Press **H** in the app for the full list of controls.
+
+| key | action |
+|---|---|
+| Space | arm / disarm (throttle must be low) |
+| W / S | throttle up / down (non-centering) |
+| A / D | yaw |
+| Arrows | pitch / roll |
+| 1 / 2 / 3 | Acro / Angle / Horizon |
+| C | camera: FPV → chase → line of sight |
+| R | reset to launch pad |
+| T / G / O | tuning panel / debug overlay / OSD |
+
+**Gamepad** (standard layout, Mode 2): left stick is throttle/yaw and right stick is pitch/roll. Start arms, Y cycles the mode, Back resets and LB changes the camera.
+
+**Radio transmitter**: set the model to USB Joystick mode. Then open **T → Controls → Set up controller / radio…** and run the calibration wizard. It detects each axis, its direction and range, and your arm and mode switches. The mapping is saved per device.
+
+Keyboard flight is for testing only. Use a radio or gamepad for real practice.
 
 ## Layout
 
 ```
 src/
-  sim/      PURE TypeScript physics + flight controller. No DOM, no Three.js.
-  tests/    Headless tests (hover, step response, determinism, allocation, ...)
-  main.ts   Placeholder entry (M2 replaces it with the real app)
-scripts/    Dev tools (plot generation)
-docs/       Spec and generated plots
+  sim/       PURE TypeScript physics + flight controller. No DOM, no Three.js.
+  input/     Keyboard, Gamepad API (gamepads + radios), stick shaping -> RcChannels
+  world/     Worlds as WorldQuery (M2: sandbox with ground, pillars, buildings, gates)
+  render/    Three.js scene, drone model, FPV/chase/LOS camera rig
+  ui/        OSD, tuning panel, debug overlay, controller setup, help
+  platform/  Storage, frame stats
+  app.ts     Wires the loop: input -> fixed-step sim -> interpolated render
+  settings.ts  Persisted app settings (sim params, camera, input, graphics)
+  tests/     Headless tests
+scripts/     plots, browser smoke test
+docs/        Spec and generated plots
 ```
 
-These directories are added in later milestones: `input/`, `world/`, `render/`, `game/`, `ui/`, `platform/`.
+`game/` gets added in M5.
 
 The `sim/` boundary is enforced in two ways. `tsconfig.sim.json` type-checks it without DOM libs. `src/tests/boundaries.test.ts` fails if it imports anything outside `sim/`, or if it uses browser globals or nondeterministic sources such as `Math.random` and `Date.now`.
 
@@ -42,7 +70,7 @@ input → RcChannels (sampled every physics tick) → Quad.step(dt) → QuadStat
   - PID + feedforward then works on angular rate, with D on measurement, I-term relax and anti-windup.
   - Angle and Horizon modes add self-leveling. It uses the shortest rotation, so Angle mode also recovers from inverted.
 - **`Mixer`** derives quad-X factors from motor geometry and desaturates in airmode style, like BF `mixer.c`.
-- **`WorldQuery`** is the only thing the physics knows about the world: signed `distance()`, `normal()` and optional `raycast()`. Collision is a sphere against that distance.
+- **`WorldQuery`** is the only thing the physics knows about the world: signed `distance()`, `normal()` and optional `raycast()`. Collision is a sphere against that distance. The M2 sandbox uses the same box list for rendering and collision, so what you see is what you hit.
 - **Zero allocation per tick**, verified with V8's sampling heap profiler (`alloc.test.ts`).
 - **Deterministic**: the same params and inputs give a bit-identical trajectory.
 
@@ -103,6 +131,20 @@ Presets in `RATE_PRESETS`: `beginner`, `betaflightDefault`, `freestyle`, `racing
 | `angularDamping` | N·m/(rad/s) | 0.0004, 0.0006, 0.0004 |
 | `battery.{enabled,cells,capacityMah,internalResistance,startCharge}` | –, –, mAh, Ω, 0..1 | true, 6, 1300, 0.025, 1 |
 | `collision.{radius,restitution,friction,crashSpeed,disarmOnCrash}` | m, –, 1/s, m/s, – | 0.12, 0.2, 6, 6, true |
+
+### App settings (camera, input, graphics)
+
+These are saved in localStorage under `freedom.settings` and edited in the tuning panel.
+
+| setting | unit | default |
+|---|---|---|
+| `camera.fpvTilt` | deg | 30 |
+| `camera.fpvFov` | deg, screen diagonal | 120 |
+| `camera.chaseDistance`, `chaseHeight` | m | 2.2, 0.7 |
+| `camera.losFov` | deg, vertical | 50 |
+| `input.shaping.{roll,pitch,yaw,throttle}.{deadzone,expo,sensitivity}` | 0..1 | 0.02 / 0 / 1 (throttle: no deadzone) |
+| `input.keyboardStickSpeed`, `keyboardThrottleSpeed` | full travel / s | 5, 0.6 |
+| `graphics.maxPixelRatio` | × | 2 |
 
 ### Environment (`env`)
 
