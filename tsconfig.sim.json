@@ -1,0 +1,9 @@
+{
+  "//": "Type-checks src/sim with NO DOM types and no ambient @types. Any use of window/document/three in sim fails here.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2022"],
+    "types": []
+  },
+  "include": ["src/sim"]
+}
