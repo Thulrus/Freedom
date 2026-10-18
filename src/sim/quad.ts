@@ -143,6 +143,20 @@ export class Quad {
     this.fc.reset();
   }
 
+  /** Whether the arm switch must be cycled before arming (set by reset() if it was on). */
+  get armSwitchLatched(): boolean {
+    return this.needArmToggle;
+  }
+
+  /**
+   * Restore the arm-switch history after reset() (deterministic replays):
+   * a fresh Quad doesn't know the switch was already on.
+   */
+  setArmSwitchLatched(on: boolean): void {
+    this.prevArmSwitch = on;
+    this.needArmToggle = on;
+  }
+
   /** Pack open-circuit voltage from state of charge (simple LiPo curve). */
   openCircuitVoltage(charge: number): number {
     const saved = this.state.charge;

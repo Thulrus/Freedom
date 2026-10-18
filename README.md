@@ -4,7 +4,7 @@
 
 A browser FPV drone simulator, mobile-first, for practicing real acro flying. It uses procedurally generated worlds. It is static files only, with no backend. The full spec is in [`docs/SPEC.md`](docs/SPEC.md).
 
-**Status: Milestone 4 (streaming procedural terrain) is built.** You fly over endless, seeded rolling hills with lakes, forests and mountains by default; the M2 sandbox (pillars and a gate loop) is still available. M3 still needs checking on a real Android phone and an iPhone (see [`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md)), and M2 needs a hands-on check with a real radio or gamepad. You can fly with touch, a keyboard, a gamepad, or a radio in USB joystick mode. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
+**Status: Milestone 5 (game modes, first pass) is built.** Fly free, race a procedural gate course against your best-lap ghost, or practise five training drills, each with a score, stars and feedback. Every flight can be replayed with telemetry graphs. M4 (streaming terrain) has been flown on a real phone. M3 still wants the full device checklist ([`docs/DEVICE-TESTING.md`](docs/DEVICE-TESTING.md)), and M2 a check with a real radio. See [`DEVLOG.md`](DEVLOG.md) for progress and open questions.
 
 ## Quick start
 
@@ -31,6 +31,8 @@ Press **H** in the app for the full list of controls.
 | 1 / 2 / 3 | Acro / Angle / Horizon |
 | C | camera: FPV → chase → line of sight |
 | R | reset to launch pad |
+| M | menu: free flight, gate race, training drills |
+| P | replay the flight since the last reset (with telemetry) |
 | T / G / O | tuning panel / debug overlay / OSD |
 
 **Touch** (phones and tablets): the left thumb controls throttle and yaw, the right thumb pitch and roll, in Mode 2. Modes 1, 3 and 4 are in ⚙ → Touch sticks. Your thumb can land anywhere on its half of the screen and the stick never jumps. Throttle stays where you leave it; a self-centering "release = hover" option exists for beginners. Use the on-screen ARM, mode, CAM and RESET buttons. Touch sticks are only an approximation: plug in a radio or gamepad for practice that transfers to a real quad.
@@ -60,7 +62,7 @@ scripts/     plots, browser smoke test
 docs/        Spec and generated plots
 ```
 
-`game/` gets added in M5.
+  game/      PURE game modes: course layouts, races and drills, scoring, flight recorder + replay, ghost track
 
 The `sim/` boundary is enforced in two ways. `tsconfig.sim.json` type-checks it without DOM libs. `src/tests/boundaries.test.ts` fails if it imports anything outside `sim/`, or if it uses browser globals or nondeterministic sources such as `Math.random` and `Date.now`.
 
@@ -86,6 +88,24 @@ input → RcChannels (sampled every physics tick) → Quad.step(dt) → QuadStat
 - World: right-handed, **+Y up**, matching Three.js. Body: **+X right, +Y up (thrust), −Z forward**.
 - `RcChannels`: `throttle` is 0..1. `roll`, `pitch` and `yaw` are −1..1. Positive means stick right or stick forward: roll right, nose down, yaw right.
 - Motor order is Betaflight's: 1 rear-right, 2 front-right, 3 rear-left, 4 front-left. Spin directions are "props in".
+
+## Game modes
+
+Open the menu with **M** (or ☰ on touch). Each mode is laid out around the launch pad of the current world and seed, so every world gives you a different course. Personal bests are saved per world and seed.
+
+| mode | goal | score |
+|---|---|---|
+| Free flight | No rules | – |
+| Gate race | 3 laps of an 8-gate loop; a missed gate has to be flown back to | total time; stars from average speed; races a ghost of your best lap |
+| Slalom | Six pylons on alternating sides (outline shows the side), start to finish line | time |
+| Figure-8 | Through the middle, round the right pylon, back through the middle, round the left | time |
+| Hover hold | Stay inside a 2 m box for 10 s straight | time taken; feedback on drift |
+| Power loop | Through a gate, back over the top, through again | loop time and height |
+| Dive & recover | Climb above 40 m, dive, pull out as low as you dare | lowest height above ground |
+
+The next gate is highlighted and an on-screen ring (or edge arrow) points to it. Gates and pylons are solid: they are added to the world's `WorldQuery`, so the physics is unchanged.
+
+**Replays and telemetry.** Every flight is recorded from the pad: just the sticks, arm switch and mode for each physics tick (about 270 kB per minute, up to 10 minutes). A replay re-simulates the flight from the same start. The sim is deterministic, so this reproduces it exactly, and the replay checks itself against the live flight. The re-simulation also yields full telemetry: stick inputs, gyro vs setpoint per axis, motor outputs and altitude, plotted around the playback cursor. Changing physics settings mid-flight makes that flight unreplayable (press R to start a fresh one).
 
 ## Worlds
 

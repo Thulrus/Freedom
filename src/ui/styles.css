@@ -148,3 +148,48 @@ body { touch-action: none; }
 .modal { z-index: 20; }
 /* Keep the dialog's main action reachable without scrolling on short screens. */
 .modal-box > .btn.big { position: sticky; bottom: 0; box-shadow: 0 -8px 16px var(--panel); }
+
+/* ---------- Game HUD ---------- */
+.ghud { position: absolute; inset: 0; pointer-events: none !important; z-index: 2; }
+.ghud-top { position: absolute; top: max(58px, calc(env(safe-area-inset-top) + 50px)); left: 0; right: 0; text-align: center;
+  font: 700 clamp(14px, 2vw, 22px)/1.2 ui-monospace, 'Courier New', monospace; color: #fff; text-shadow: 0 0 3px #000, 0 0 6px #000; letter-spacing: 0.04em; }
+.ghud-sub { font-size: 0.68em; color: var(--accent); margin-top: 3px; }
+.ghud-ring { position: absolute; left: 0; top: 0; width: 34px; height: 34px; margin: -17px 0 0 -17px; border: 2px solid #ffe14d; border-radius: 50%;
+  box-shadow: 0 0 4px #000; will-change: transform; }
+.ghud-dist { position: absolute; top: 36px; left: 50%; transform: translateX(-50%); font: 700 12px ui-monospace, monospace; color: #ffe14d; text-shadow: 0 0 3px #000; white-space: nowrap; }
+.ghud-arrow { position: absolute; left: 0; top: 0; width: 30px; height: 30px; margin: -15px 0 0 -15px; color: #ffe14d; font-size: 26px; line-height: 30px; text-align: center;
+  text-shadow: 0 0 4px #000; will-change: transform; }
+
+/* ---------- Mode menu & results ---------- */
+.mode-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin: 10px 0; }
+.mode-card { display: flex; flex-direction: column; gap: 3px; text-align: left; background: var(--panel-2); color: var(--text); border: 1px solid var(--line); border-radius: 8px;
+  padding: 10px; font: inherit; cursor: pointer; touch-action: manipulation; }
+.mode-card:hover { border-color: #6e7681; }
+.mode-card.on { border-color: var(--accent); }
+.mode-card span { color: var(--dim); font-size: 12px; }
+.mode-card em { color: var(--accent); font-style: normal; font-size: 12px; }
+.result-head { display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; margin: 6px 0 10px; }
+.result-score { font: 700 32px ui-monospace, monospace; }
+.result-stars { font-size: 26px; color: var(--accent); letter-spacing: 2px; }
+.result-pb { color: #7fd36b; font-weight: 700; }
+.result-lines { margin: 0 0 8px; padding-left: 18px; color: #c9d1d9; }
+
+/* ---------- Replay & telemetry ---------- */
+.replay-bar { position: absolute; left: 50%; bottom: max(10px, env(safe-area-inset-bottom)); transform: translateX(-50%); display: flex; flex-wrap: wrap; align-items: center; gap: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 6px 8px; width: min(780px, calc(100vw - 24px)); z-index: 12; }
+.replay-tag { font: 700 12px ui-monospace, monospace; color: var(--danger); letter-spacing: 0.08em; }
+.replay-scrub { flex: 1; min-width: 120px; accent-color: var(--accent); touch-action: none; }
+.replay-time { font: 12px ui-monospace, monospace; color: var(--dim); white-space: nowrap; }
+.replay-warn { flex-basis: 100%; color: var(--accent); font-size: 12px; }
+.tele { position: absolute; left: max(12px, env(safe-area-inset-left)); right: max(12px, env(safe-area-inset-right)); bottom: calc(max(10px, env(safe-area-inset-bottom)) + 64px);
+  height: min(46vh, 360px); background: rgba(13, 17, 23, 0.82); border: 1px solid var(--line); border-radius: 8px; z-index: 11; pointer-events: none !important; }
+.tele-canvas { width: 100%; height: calc(100% - 20px); display: block; }
+.tele-key { display: flex; gap: 12px; font: 11px ui-monospace, monospace; padding: 2px 8px; color: var(--dim); }
+/* Keep dialog action rows reachable without scrolling; compact game menu on short (landscape phone) screens. */
+.modal-box > .btn-row:last-of-type { position: sticky; bottom: 0; background: var(--panel); margin-bottom: 0; padding: 6px 0 2px; }
+@media (max-height: 500px) {
+  .mode-grid { grid-template-columns: repeat(4, 1fr); gap: 6px; margin: 6px 0; }
+  .mode-card { padding: 6px 8px; gap: 1px; }
+  .mode-card span { font-size: 11px; line-height: 1.25; }
+  .result-score { font-size: 26px; }
+}

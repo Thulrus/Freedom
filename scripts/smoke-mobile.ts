@@ -83,8 +83,15 @@ check(vp.scrollY === 0 && vp.scale === 1, `no page scroll/zoom from pinch/drag (
 const lat = await app<{ n: number; avg: number; p95: number }>('({ n: f.latency.sampleCount, ...f.latency.stats() })');
 check(lat.n > 5, `latency meter collected ${lat.n} samples (avg ${lat.avg.toFixed(1)} ms, p95 ${lat.p95.toFixed(1)} ms)`);
 
+// Game menu opens from the touch bar.
+await page.tap('.touch-bar .tbtn:has-text("☰")');
+await page.waitForTimeout(300);
+check(await page.evaluate(() => document.querySelectorAll('.mode-card').length === 7), 'menu button opens the game menu');
+await page.screenshot({ path: `${OUT}/mobile-menu.png` });
+await page.tap('.modal-box button:has-text("Close")');
+
 // Tuning drawer opens and scrolls on a phone.
-await page.tap('.touch-bar .tbtn:nth-child(5)');
+await page.tap('.touch-bar .tbtn:has-text("⚙")');
 await page.waitForTimeout(300);
 await page.screenshot({ path: `${OUT}/mobile-2-tuning.png` });
 await page.tap('.tune-head .btn');

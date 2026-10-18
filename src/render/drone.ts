@@ -8,16 +8,18 @@ export class DroneModel {
   private readonly props: THREE.Mesh[] = [];
   private readonly spin: number[] = [];
 
-  constructor(quad: QuadParams) {
-    const carbon = new THREE.MeshLambertMaterial({ color: 0x23262b, flatShading: true });
-    const metal = new THREE.MeshLambertMaterial({ color: 0x9aa3ad, flatShading: true });
-    const accent = new THREE.MeshLambertMaterial({ color: 0xff5a36, flatShading: true });
+  /** ghost: one translucent color for everything (best-lap ghost). */
+  constructor(quad: QuadParams, opts: { ghost?: boolean } = {}) {
+    const ghost = opts.ghost ? new THREE.MeshBasicMaterial({ color: 0x8fe9ff, transparent: true, opacity: 0.5, depthWrite: false }) : null;
+    const carbon = ghost ?? new THREE.MeshLambertMaterial({ color: 0x23262b, flatShading: true });
+    const metal = ghost ?? new THREE.MeshLambertMaterial({ color: 0x9aa3ad, flatShading: true });
+    const accent = ghost ?? new THREE.MeshLambertMaterial({ color: 0xff5a36, flatShading: true });
     const g = this.group;
 
     // Body stack + battery on top.
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.025, 0.11), carbon);
     g.add(body);
-    const batt = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.03, 0.075), new THREE.MeshLambertMaterial({ color: 0x3a6fd8 }));
+    const batt = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.03, 0.075), ghost ?? new THREE.MeshLambertMaterial({ color: 0x3a6fd8 }));
     batt.position.set(0, 0.03, 0.005);
     g.add(batt);
     const cam = new THREE.Mesh(new THREE.BoxGeometry(0.022, 0.022, 0.02), accent);

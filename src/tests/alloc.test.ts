@@ -2,6 +2,9 @@ import { Session } from 'node:inspector/promises';
 import { describe, expect, it } from 'vitest';
 import { FixedStepper, FlatGround, type RcChannels, type SimParams, type WorldQuery } from '../sim';
 import { buildWorld } from '../world/recipes';
+import { OverlayWorld } from '../world/overlay';
+import { raceLayout } from '../game/layouts';
+import { FlightRecorder } from '../game/recorder';
 import { arm, makeQuad } from './helpers';
 
 interface ProfileNode {
@@ -48,7 +51,7 @@ async function profileTicks(world: WorldQuery, spawn: [number, number, number], 
 
   const bySite = new Map<string, number>();
   const walk = (n: ProfileNode) => {
-    if (n.selfSize > 0 && /\/src\/(sim|world)\//.test(n.callFrame.url)) {
+    if (n.selfSize > 0 && /\/src\/(sim|world|game)\//.test(n.callFrame.url)) {
       const key = `${n.callFrame.functionName || '(anon)'} (${n.callFrame.url.split('/').pop()}:${n.callFrame.lineNumber + 1})`;
       bySite.set(key, (bySite.get(key) ?? 0) + n.selfSize);
     }
@@ -78,8 +81,10 @@ describe('hot loop allocation', () => {
     expect(r.perTick, `allocations in sim/:\n${r.report}`).toBeLessThan(0.5);
   });
 
-  it('colliding with procedural terrain and trees allocates nothing', async () => {
-    const world = buildWorld('hills', 1);
+  it('terrain, trees, race gates and the flight recorder allocate nothing', async () => {
+    const base = buildWorld('hills', 1);
+    const world = new OverlayWorld(base, raceLayout(base).boxes);
+    const rec = new FlightRecorder();
     // Skim the ground in Angle mode, wandering through a forest (crashes are off).
     const r = await profileTicks(world, [60, world.groundHeight(60, 0) + 0.5, 0], (r, t) => {
       r.arm = true;
@@ -87,9 +92,11 @@ describe('hot loop allocation', () => {
       r.throttle = 0.28 + 0.06 * Math.sin(t * 0.004);
       r.pitch = 0.5;
       r.roll = 0.4 * Math.sin(t * 0.0011);
+      if (rec.full) rec.ticks = 0;
+      rec.capture(r);
     }, (p) => (p.quad.collision.disarmOnCrash = false));
     expect(r.ticks).toBeGreaterThan(100000);
     expect(r.contacts).toBeGreaterThan(1000);
-    expect(r.perTick, `allocations in sim/ + world/:\n${r.report}`).toBeLessThan(0.5);
+    expect(r.perTick, `allocations in sim/ + world/ + game/:\n${r.report}`).toBeLessThan(0.5);
   });
 });

@@ -1,11 +1,11 @@
-import { h } from './dom';
+import { backdropClose, h } from './dom';
 
 /** Controls reference + an honest note on input devices. */
 export function helpPanel(touch: boolean, onClose: () => void): HTMLElement {
   const row = (k: string, v: string) => h('tr', null, h('td', { class: 'kbd' }, k), h('td', null, v));
   return h(
     'div',
-    { class: 'modal', onclick: (e: Event) => e.target === e.currentTarget && onClose() },
+    backdropClose(onClose),
     h(
       'div',
       { class: 'modal-box' },
@@ -30,6 +30,7 @@ export function helpPanel(touch: boolean, onClose: () => void): HTMLElement {
               row('ARM', 'Arm / disarm. Throttle must be all the way down.'),
               row('ACRO', 'Cycle Acro / Angle / Horizon. Beginners: try Angle first.'),
               row('CAM', 'FPV → chase → line of sight'),
+              row('☰', 'Menu: free flight, gate race, training drills, replay'),
               row('⚙', 'Tuning: rates, touch layout, stick size, expo, graphics'),
               row('⛶', 'Fullscreen'),
             ),
@@ -45,7 +46,9 @@ export function helpPanel(touch: boolean, onClose: () => void): HTMLElement {
         row('Arrows', 'Pitch and roll'),
         row('1 / 2 / 3', 'Acro / Angle / Horizon'),
         row('C', 'Camera: FPV → chase → line of sight'),
-        row('R', 'Reset to the launch pad'),
+        row('R', 'Reset to the launch pad (restarts a race or drill)'),
+        row('M', 'Menu: free flight, gate race, training drills'),
+        row('P', 'Replay your flight, with telemetry graphs'),
         row('T', 'Tuning panel (world & seed, rates, PIDs, physics, camera, JSON)'),
         row('G', 'Debug overlay'),
         row('O', 'Toggle OSD'),

@@ -241,6 +241,67 @@ Probing `distance()` in isolation showed neither problem, because the probe cros
 - **Tree density** for proximity flying: too sparse or too dense?
 - On a phone: the overlay's fps, `world gen` peak and draw calls on High and Low after a 10-minute flight in one direction.
 
-## Next: M5 — Game modes (first pass)
+## M5 — Game modes, first pass (built; needs real-pilot feedback)
 
-Gate courses with timing, a few training drills, replay/ghost and a telemetry view. Acceptance: a complete loop of picking a world, flying a drill, seeing the score, and watching the replay.
+### What exists
+
+- **`game/`**: pure logic with no DOM or three.js, enforced by the layer-boundary test.
+  - **Layouts** (`layouts.ts`) are fitted around the pad of any world and are deterministic per world and seed. Every placement is checked against the world's own distance field: openings, approach lines and posts must be clear of terrain, trees and rocks. If not, the gate is moved, or the whole layout is rotated in 20° steps.
+  - **Runs** (`activities.ts`):
+    - Gate race: 3 laps, strict gate order, best-lap ghost.
+    - Slalom.
+    - Figure-8.
+    - Hover hold.
+    - Power loop: needs a real loop, i.e. higher than the gate and inverted between the two passes.
+    - Dive & recover.
+    
+    Each run produces a score, 1–3 stars and feedback lines. Crossings are tested on the segment between frames, and their times are interpolated.
+  - **Recorder and replay** (`recorder.ts`):
+    - Live, it logs 9 bytes per tick; sticks are rounded to float32 before the sim sees them, so the replay's inputs are bit-identical.
+    - A replay re-simulates the recording into a 100 Hz trace: pose, velocity, sticks, gyro, setpoint, motors, battery and mode. The final state is compared with the live one, and the replay shows a warning if they differ.
+    - `Quad.setArmSwitchLatched` restores the one piece of history a fresh Quad lacks: whether the arm switch was already on at reset.
+  - **Ghost** (`track.ts`): the best lap's poses, stored base64 in localStorage per world and seed.
+- **Gates are physical.** `world/overlay.ts` wraps any world with extra boxes. `world/boxes.ts` holds the box SDF and gate frames that the sandbox now uses too (its boxes come out identical).
+- **UI**:
+  - Menu (M / ☰), instructions, and a results dialog (Retry / Replay / Telemetry / Free flight).
+  - Game HUD: status, hint, and a target ring or edge arrow.
+  - Replay bar: restart, play/pause, 0.25–2× speed, scrub, graphs, camera, exit.
+  - Telemetry panel: an 8 s window around the cursor.
+  - Course view: solid frames and pylons, faint window outlines, a pulsing highlight on the next checkpoint, and the hover box (it turns green inside).
+  - The ghost is drawn translucent at 2× size, so it's easy to spot.
+
+### Testing
+
+- 101 unit tests (+15):
+  - crossing geometry
+  - layouts clear of obstacles and deterministic, on both worlds
+  - strict-order and direction-checked race timing
+  - each drill succeeding and failing
+  - replay determinism over terrain with gates, including the arm-switch-latched case
+  - ghost encode/decode
+- The allocation test now flies terrain + race gates with the recorder capturing every tick: still zero garbage in sim/, world/ and game/.
+- `npm run smoke` runs the M5 acceptance loop in Chromium: world → menu → race → (teleported) 3 laps → results → replay with telemetry → back to results → free flight. A real keyboard flight replays bit-exactly in the browser. `smoke:mobile` checks that ☰ opens the menu.
+
+### Bugs found along the way
+
+- **The menu closed itself on phones.** Touch-bar buttons act on `pointerup`, and the browser's follow-up `click` landed on the backdrop of the dialog they had just opened, which closed it. This appeared once the menu got compact enough not to cover the toolbar. Dialog backdrops now close only if the press started on them (`backdropClose` in `ui/dom.ts`, used by all dialogs).
+- The course highlight and ghost were first positioned after the render, a one-frame lag (and a visible jump on origin rebases). They now update before the render.
+
+### Known limitations
+
+- Star thresholds (average speed for courses, times for drills) are first guesses. Real pilots should tune them.
+- The race layout is a fixed shape (an 8-gate loop curving right) fitted to the terrain. Varied course types (technical, flowy, dive gates) come later.
+- Replays cover the flight since the last reset (up to 10 minutes) and aren't saved or shareable yet. The input log is small enough to export later.
+- No split-S, proximity or precision-landing drills yet. The spec lists them, and the activity interface makes them cheap to add.
+- Bundle: 186 kB gzipped (+15 kB).
+
+### Feedback wanted (M5)
+
+- **Do the drills teach the right things?** Are the success criteria fair? Power loop: higher than the gate + 2 m and inverted. Dive: from 40 m, starting at 12 m/s down.
+- **Star thresholds**: race 6/10/14 m/s average gate-to-gate; hover 40/25/14 s; power loop 4/3/2.2 s; dive 6/3/1.5 m.
+- Is the target ring and arrow useful in FPV, or distracting?
+- On a phone: menu, results and replay bar readability, and fps during replay with graphs open.
+
+## Next: M6 — Cities
+
+Procedural low-poly city recipe with instancing/merging; fly-between-buildings playability. Acceptance: holds 60 fps on the target phone; collision feels right between buildings.

@@ -16,6 +16,7 @@ export interface TouchHost {
   camera(): void;
   reset(): void;
   tune(): void;
+  menu(): void;
   fullscreen(): void;
 }
 
@@ -75,6 +76,7 @@ export class TouchControls {
         this.modeBtn,
         btn('CAM', '', () => host.camera()),
         btn('RESET', '', () => host.reset()),
+        btn('☰', '', () => host.menu()),
         btn('⚙', '', () => host.tune()),
         fullscreenSupported() ? btn('⛶', '', () => host.fullscreen()) : null,
       ),

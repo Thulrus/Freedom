@@ -31,8 +31,8 @@ describe('layer boundaries', () => {
   const layer = (dir: string) => readdirSync(join(__dirname, '..', dir)).filter((f) => f.endsWith('.ts')).map((f) => [f, readFileSync(join(__dirname, '..', dir, f), 'utf8')] as const);
   const imports = (src: string) => [...src.matchAll(/(?:import|export)[^'"]*from\s*['"]([^'"]+)['"]/g)].map((m) => m[1]);
 
-  it('world/ and input/ never import rendering, UI or three', () => {
-    for (const dir of ['world', 'input']) {
+  it('world/, input/ and game/ never import rendering, UI or three', () => {
+    for (const dir of ['world', 'input', 'game']) {
       for (const [f, src] of layer(dir)) {
         for (const imp of imports(src)) expect(imp, `${dir}/${f} imports ${imp}`).not.toMatch(/^three$|\/render\/|\/ui\/|^\.\.\/app/);
       }

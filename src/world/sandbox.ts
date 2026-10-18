@@ -4,38 +4,10 @@
  * what you see is what you hit.
  */
 import { Rng, Vec3, type Hit } from '../sim';
+import { BoxSet, gateFrame, type BoxDef, type GateDef } from './boxes';
 import type { GameWorld } from './recipes';
 
-export type BoxKind = 'pillar' | 'building' | 'gate';
-
-export interface BoxDef {
-  /** Center, m. */
-  cx: number;
-  cy: number;
-  cz: number;
-  /** Half extents, m. */
-  hx: number;
-  hy: number;
-  hz: number;
-  /** Rotation about +Y, radians. */
-  yaw: number;
-  kind: BoxKind;
-  /** Display color, 0xRRGGBB. */
-  color: number;
-}
-
-export interface GateDef {
-  /** Center of the opening, m. */
-  x: number;
-  y: number;
-  z: number;
-  /** Rotation about +Y; the opening faces local +/-Z. */
-  yaw: number;
-  width: number;
-  height: number;
-}
-
-const STRIDE = 9; // cx cy cz hx hy hz cos sin boundRadius
+export type { BoxDef, BoxKind, GateDef } from './boxes';
 
 export class SandboxWorld implements GameWorld {
   readonly id = 'sandbox' as const;
@@ -44,7 +16,7 @@ export class SandboxWorld implements GameWorld {
   readonly boxes: BoxDef[];
   readonly gates: GateDef[];
   readonly spawn = new Vec3(0, 0, 0);
-  private readonly data: Float64Array;
+  private readonly set: BoxSet;
   private readonly tmp = new Vec3();
   private readonly hit: Hit = { distance: 0, point: new Vec3(), normal: new Vec3() };
 
@@ -55,37 +27,14 @@ export class SandboxWorld implements GameWorld {
   ) {
     this.boxes = boxes;
     this.gates = gates;
-    this.data = new Float64Array(boxes.length * STRIDE);
-    boxes.forEach((b, i) => {
-      const o = i * STRIDE;
-      this.data.set([b.cx, b.cy, b.cz, b.hx, b.hy, b.hz, Math.cos(b.yaw), Math.sin(b.yaw), Math.hypot(b.hx, b.hy, b.hz)], o);
-    });
+    this.set = new BoxSet(boxes);
   }
 
   distance(p: Vec3): number {
-    let best = p.y - this.groundY;
-    const d = this.data;
-    const px = p.x, py = p.y, pz = p.z;
-    for (let o = 0; o < d.length; o += STRIDE) {
-      const dx = px - d[o], dy = py - d[o + 1], dz = pz - d[o + 2];
-      // Cheap reject: bounding sphere can't beat the current best.
-      const r = d[o + 8];
-      const cd = Math.sqrt(dx * dx + dy * dy + dz * dz) - r;
-      if (cd >= best) continue;
-      // Into box space (inverse yaw rotation).
-      const c = d[o + 6], s = d[o + 7];
-      const lx = c * dx - s * dz;
-      const lz = s * dx + c * dz;
-      const qx = Math.abs(lx) - d[o + 3];
-      const qy = Math.abs(dy) - d[o + 4];
-      const qz = Math.abs(lz) - d[o + 5];
-      const ox = qx > 0 ? qx : 0, oy = qy > 0 ? qy : 0, oz = qz > 0 ? qz : 0;
-      const outside = Math.sqrt(ox * ox + oy * oy + oz * oz);
-      const m = qx > qy ? (qx > qz ? qx : qz) : qy > qz ? qy : qz;
-      const dist = outside + (m < 0 ? m : 0);
-      if (dist < best) best = dist;
-    }
-    return best;
+    const io = this.set.io;
+    io[0] = p.y - this.groundY;
+    this.set.nearest(p);
+    return io[0];
   }
 
   groundHeight(): number {
@@ -151,17 +100,10 @@ export function buildSandbox(seed = 1): SandboxWorld {
     const tx = Math.cos(th), tz = -Math.sin(th); // loop tangent
     const yaw = Math.atan2(tx, tz);
     const color = GATE_COLORS[i % GATE_COLORS.length];
-    const w = 1.8, h = 1.8, bottom = i % 2 ? 0.6 : 1.4, bar = 0.08;
-    gates.push({ x: gx, y: bottom + h / 2, z: gz, yaw, width: w, height: h });
-    const top = bottom + h;
-    const part = (lx: number, ly: number, hx: number, hy: number) => {
-      const c = Math.cos(yaw), s = Math.sin(yaw);
-      boxes.push({ cx: gx + c * lx, cy: ly, cz: gz - s * lx, hx, hy, hz: bar, yaw, kind: 'gate', color });
-    };
-    part(-(w / 2 + bar), (top + bar) / 2, bar, (top + bar) / 2); // left post, from ground
-    part(w / 2 + bar, (top + bar) / 2, bar, (top + bar) / 2); // right post
-    part(0, top + bar / 2, w / 2, bar / 2); // top bar
-    part(0, bottom - bar / 2, w / 2, bar / 2); // bottom bar
+    const w = 1.8, h = 1.8, bottom = i % 2 ? 0.6 : 1.4;
+    const gate = { x: gx, y: bottom + h / 2, z: gz, yaw, width: w, height: h };
+    gates.push(gate);
+    boxes.push(...gateFrame(gate, 0, color));
   }
 
   const clear = (x: number, z: number, r: number) => {

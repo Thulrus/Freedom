@@ -38,3 +38,21 @@ export function isTyping(e: Event): boolean {
   const tag = t.tagName;
   return tag === 'TEXTAREA' || tag === 'SELECT' || (tag === 'INPUT' && !['range', 'checkbox', 'button'].includes((t as HTMLInputElement).type));
 }
+
+/**
+ * Attributes for a dialog backdrop that closes it on a tap. The press must
+ * also start on the backdrop: touch-bar buttons act on pointerup, and the
+ * browser's follow-up click would otherwise land on the dialog they just
+ * opened and close it again.
+ */
+export function backdropClose(onClose: () => void): Attrs {
+  let armed = false;
+  return {
+    class: 'modal',
+    onpointerdown: (e: Event) => (armed = e.target === e.currentTarget),
+    onclick: (e: Event) => {
+      if (armed && e.target === e.currentTarget) onClose();
+      armed = false;
+    },
+  };
+}

@@ -6,7 +6,7 @@
 import { defaultMappingFor, detectAxis, detectSwitch, normalizeStick, normalizeThrottle, readSwitch, type AxisMap, type GamepadMapping, type SwitchMap } from '../input/gamepad';
 import type { InputManager } from '../input/manager';
 import type { FlightMode } from '../sim';
-import { h, setText } from './dom';
+import { h, setText, backdropClose } from './dom';
 
 type Ch = 'roll' | 'pitch' | 'yaw' | 'throttle';
 const CHANNELS: Ch[] = ['throttle', 'yaw', 'pitch', 'roll'];
@@ -30,7 +30,7 @@ export class GamepadSetup {
     private readonly save: (id: string, m: GamepadMapping | null) => void,
     private readonly onClose: () => void,
   ) {
-    this.root = h('div', { class: 'modal', onclick: (e: Event) => e.target === e.currentTarget && this.close() });
+    this.root = h('div', backdropClose(() => this.close()));
   }
 
   open(): void {

@@ -159,11 +159,77 @@ const sandbox = await page.evaluate(() => {
 await page.waitForTimeout(300);
 await page.screenshot({ path: `${OUT}/10-sandbox.png` });
 console.log('terrain', JSON.stringify({ far, streamed, sandbox }));
+
+// M5 loop: pick a world, open the menu, fly a race, see the score, watch the replay with telemetry.
+const F = (code: string) => page.evaluate(`(() => { const f = window.freedom; ${code} })()`);
+await F(`f.settings.world = { recipe: 'hills', seed: 1 }; f.loadWorld();`);
+await page.keyboard.press('KeyM');
+await page.waitForTimeout(200);
+await page.screenshot({ path: `${OUT}/11-menu.png` });
+await page.click('.mode-card:has-text("Gate race")');
+await page.waitForTimeout(200);
+await page.screenshot({ path: `${OUT}/12-race-instructions.png` });
+await page.click('.modal-box .btn.primary');
+await page.keyboard.press('Space'); // arm
+await page.keyboard.down('KeyW');
+await page.waitForTimeout(700);
+await page.keyboard.up('KeyW');
+await page.keyboard.press('KeyC'); // chase cam to see the gates
+await page.waitForTimeout(300);
+await page.screenshot({ path: `${OUT}/13-race-flying.png` });
+// Teleport through every gate in order (3 laps + finish) — tests timing and the results flow, not piloting.
+const race = await page.evaluate(
+  () =>
+    new Promise<{ phase: string; laps: number[]; modal: boolean }>((res) => {
+      const f = (window as any).freedom;
+      const cps = f.act.layout.checkpoints;
+      const seq = [...cps, ...cps, ...cps, cps[0]];
+      let k = 0, step = 0;
+      const tick = () => {
+        const c = seq[k], s = f.quad.state;
+        const fx = Math.sin(c.yaw), fz = Math.cos(c.yaw), d = step < 2 ? -2 : 2;
+        s.pos.set(c.x + fx * d, c.y, c.z + fz * d);
+        s.vel.set(fx * 15, 0, fz * 15);
+        f.stepper.sync();
+        if (++step === 4) {
+          step = 0;
+          k++;
+        }
+        if (k < seq.length && f.act.run.phase !== 'failed') requestAnimationFrame(tick);
+        else setTimeout(() => res({ phase: f.act.run.phase, laps: f.act.run.laps, modal: !!document.querySelector('.result-score') }), 300);
+      };
+      tick();
+    }),
+);
+await page.screenshot({ path: `${OUT}/14-results.png` });
+await page.click('.modal-box button:has-text("Telemetry")');
+await page.waitForTimeout(1200);
+await page.screenshot({ path: `${OUT}/15-replay-telemetry.png` });
+const replayOn = await page.evaluate(() => !!(window as any).freedom.replay);
+await page.keyboard.press('Escape');
+await page.waitForTimeout(200);
+const backToResults = await page.evaluate(() => !!document.querySelector('.result-score'));
+await page.click('.modal-box button:has-text("Free flight")');
+// A real (keyboard) flight must replay bit-exactly.
+await page.keyboard.press('Space');
+await page.keyboard.down('KeyW');
+await page.keyboard.down('ArrowUp');
+await page.waitForTimeout(1500);
+await page.keyboard.up('KeyW');
+await page.keyboard.up('ArrowUp');
+await page.waitForTimeout(500);
+await page.keyboard.press('KeyP');
+await page.waitForTimeout(300);
+const replay = await page.evaluate(() => { const r = (window as any).freedom.replay; return r ? { diverged: r.trace.diverged, duration: r.trace.duration } : null; });
+await page.screenshot({ path: `${OUT}/16-replay.png` });
+await page.keyboard.press('Escape');
+console.log('m5', JSON.stringify({ race, replayOn, backToResults, replay }));
+const m5Ok = race.phase === 'finished' && race.laps.length === 3 && race.modal && replayOn && backToResults && !!replay && !replay.diverged && replay.duration > 1;
 const fps = await page.evaluate(() => new Promise<number>((res) => { let n = 0; const t0 = performance.now(); const f = () => { n++; if (performance.now() - t0 < 1000) requestAnimationFrame(f); else res(n); }; requestAnimationFrame(f); }));
 console.log(JSON.stringify({ armed, climbed, padArmed, padClimb, source, fps, errors }, null, 1));
 await browser.close();
 await server?.close();
 // Origin snaps to the 128 m chunk grid nearest the drone.
 const farOk = far.origin[0] === 40064 && far.origin[1] === -29952 && sandbox === 'sandbox';
-if (errors.length || !wizardOk || !farOk || !armed.armed || climbed.y - y0 < 1 || !padArmed.armed || padClimb.y - y0 < 1 || source !== 'gamepad') process.exit(1);
+if (errors.length || !wizardOk || !farOk || !m5Ok || !armed.armed || climbed.y - y0 < 1 || !padArmed.armed || padClimb.y - y0 < 1 || source !== 'gamepad') process.exit(1);
 console.log('SMOKE OK');
