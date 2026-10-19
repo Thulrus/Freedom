@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { shapeStick, shapeThrottle } from '../input/shaping';
 import { KeyboardInput } from '../input/keyboard';
-import { detectAxis, detectSwitch, normalizeStick, normalizeThrottle, radioMapping, readSwitch, standardGamepadMapping, switchPosition } from '../input/gamepad';
+import { detectAnalog, detectAxis, detectSwitch, isHeldSwitch, normalizeStick, normalizeThrottle, radioMapping, readAnalog, readSwitch, standardGamepadMapping, switchPosition } from '../input/gamepad';
 
 const flat = { deadzone: 0, expo: 0, sensitivity: 1 };
 
@@ -88,5 +88,23 @@ describe('gamepad / radio mapping', () => {
     expect(detectSwitch([0, 0, 0, 0, -1], [0, 0, 0, 0, 1], [0], [0])).toEqual({ kind: 'axis', index: 4, invert: false });
     expect(detectSwitch([0, 0, 0, 0, 1], [0, 0, 0, 0, -1], [0], [0])).toEqual({ kind: 'axis', index: 4, invert: true });
     expect(detectSwitch([0.9, 0], [-0.9, 0], [0, 0], [0, 1], [0])).toEqual({ kind: 'button', index: 1, invert: false });
+  });
+  it('Firefox/Linux radio: throttle and switches arriving as analog trigger buttons', () => {
+    // Firefox maps a radio's Z (CH3) to button 6 and Rz (CH6) to button 7, 0..1.
+    const axes = [0, 0, 0, 0];
+    const d = detectAnalog(axes, axes, [0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 1, 0]);
+    expect(d).toEqual({ button: true, index: 6, from: -1, to: 1 });
+    const thr = { index: 6, button: true, min: -1, center: 0, max: 1, invert: false };
+    expect(normalizeThrottle(readAnalog(thr, axes, [0, 0, 0, 0, 0, 0, 0.25]), thr)).toBeCloseTo(0.25, 6);
+    expect(readAnalog({ index: 2 }, [0, 0, 0.5], [])).toBe(0.5);
+    // Axes win over buttons when both moved.
+    expect(detectAnalog([0, -1], [0, 1], [0], [1])?.button).toBe(false);
+    // A 3-position switch on a trigger moving low -> mid is a held switch, not a press.
+    const s = detectSwitch(axes, axes, [0, 0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0, 0.5]);
+    expect(s).toEqual({ kind: 'button', index: 7, invert: false, analog: true });
+    expect(isHeldSwitch(s!)).toBe(true);
+    expect(switchPosition(readSwitch(s!, axes, [0, 0, 0, 0, 0, 0, 0, 0.5]))).toBe(1);
+    // Buttons used by sticks are ignored.
+    expect(detectSwitch(axes, axes, [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 1], [], [6])).toBeNull();
   });
 });

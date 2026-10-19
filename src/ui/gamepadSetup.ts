@@ -3,7 +3,7 @@
  * calibration wizard ("push throttle up", "roll right", ...) that detects
  * axis index, direction and range for any device.
  */
-import { defaultMappingFor, detectAxis, detectSwitch, normalizeStick, normalizeThrottle, readSwitch, type AxisMap, type GamepadMapping, type SwitchMap } from '../input/gamepad';
+import { defaultMappingFor, detectAnalog, detectSwitch, normalizeStick, normalizeThrottle, readAnalog, readSwitch, type AxisMap, type GamepadMapping, type SwitchMap } from '../input/gamepad';
 import type { InputManager } from '../input/manager';
 import type { FlightMode } from '../sim';
 import { h, setText, backdropClose } from './dom';
@@ -104,7 +104,7 @@ export class GamepadSetup {
       const a = m[ch];
       const fill = h('div', { class: 'bar-fill out' });
       this.live.push(() => {
-        const raw = gp.axes[a.index] ?? 0;
+        const raw = readAnalog(a, gp.axes, gp.buttons);
         if (ch === 'throttle') {
           const v = normalizeThrottle(raw, a);
           fill.style.left = '0%';
@@ -152,11 +152,23 @@ export class GamepadSetup {
   }
 
   private axisSelect(a: AxisMap): HTMLSelectElement {
-    const n = Math.max(this.gp.axisCount, a.index + 1);
+    // Analog buttons are listed too: Firefox on Linux reports a radio's Z / Rz as triggers.
+    const opts: [string, boolean, number][] = [];
+    for (let i = 0; i < Math.max(this.gp.axisCount, a.button ? 0 : a.index + 1); i++) opts.push([`axis ${i}`, false, i]);
+    for (let i = 0; i < Math.max(this.gp.buttonCount, a.button ? a.index + 1 : 0); i++) opts.push([`button ${i}`, true, i]);
+    const cur = `${a.button ? 'button' : 'axis'} ${a.index}`;
     return h(
       'select',
-      { onchange: (e: Event) => (a.index = parseInt((e.target as HTMLSelectElement).value, 10)) },
-      ...Array.from({ length: n }, (_, i) => h('option', { value: i, selected: i === a.index }, `axis ${i}`)),
+      {
+        onchange: (e: Event) => {
+          const found = opts.find(([k]) => k === (e.target as HTMLSelectElement).value);
+          if (!found) return;
+          // Button values are scaled to -1..1, so the calibrated range carries over.
+          a.button = found[1] || undefined;
+          a.index = found[2];
+        },
+      },
+      ...opts.map(([k]) => h('option', { value: k, selected: k === cur }, k)),
     );
   }
 
@@ -164,7 +176,8 @@ export class GamepadSetup {
     const opts: [string, SwitchMap | null][] = [['none', null]];
     for (let i = 0; i < this.gp.axisCount; i++) opts.push([`axis ${i}`, { kind: 'axis', index: i, invert: false }]);
     for (let i = 0; i < this.gp.buttonCount; i++) opts.push([`button ${i}`, { kind: 'button', index: i, invert: false }]);
-    const key = (s: SwitchMap | null) => (s ? `${s.kind} ${s.index}` : 'none');
+    for (let i = 0; i < this.gp.buttonCount; i++) opts.push([`button ${i} (switch)`, { kind: 'button', index: i, invert: false, analog: true }]);
+    const key = (s: SwitchMap | null) => (s ? `${s.kind} ${s.index}${s.analog ? ' (switch)' : ''}` : 'none');
     return h(
       'select',
       {
@@ -192,15 +205,18 @@ export class GamepadSetup {
     let base: Float32Array = new Float32Array(16);
     let baseBtn: Float32Array = new Float32Array(32);
     const snap = (a: Float32Array) => a.slice();
+    const sticks = () => [m.roll, m.pitch, m.yaw, m.throttle];
+    const usedAxes = () => sticks().filter((a) => !a.button).map((a) => a.index);
+    const usedButtons = () => sticks().filter((a) => a.button).map((a) => a.index);
     const stick = (ch: Exclude<Ch, 'throttle'>, dir: 'max' | 'min', label: string): WizardStep => ({
       text: label,
-      take: (axes) => {
+      take: (axes, btn) => {
         if (dir === 'max') {
-          const d = detectAxis(base, axes);
+          const d = detectAnalog(base, axes, baseBtn, btn);
           if (!d) return 'No stick movement detected. Push the stick all the way and hold it.';
-          m[ch] = { index: d.index, center: d.from, max: d.to, min: d.from - (d.to - d.from), invert: false };
+          m[ch] = { index: d.index, button: d.button || undefined, center: d.from, max: d.to, min: d.from - (d.to - d.from), invert: false };
         } else {
-          const v = axes[m[ch].index];
+          const v = readAnalog(m[ch], axes, btn);
           if (Math.abs(v - m[ch].center) < 0.3) return 'Push the stick all the way the other way and hold it.';
           m[ch].min = v;
         }
@@ -211,10 +227,10 @@ export class GamepadSetup {
       { text: 'Center roll, pitch and yaw. Put the throttle all the way DOWN. Set the arm switch to DISARMED.', take: (a, b) => { base = snap(a); baseBtn = snap(b); return null; } },
       {
         text: 'Push the THROTTLE all the way UP and hold it.',
-        take: (axes) => {
-          const d = detectAxis(base, axes);
+        take: (axes, btn) => {
+          const d = detectAnalog(base, axes, baseBtn, btn);
           if (!d) return 'No throttle movement detected.';
-          m.throttle = { index: d.index, min: d.from, center: (d.from + d.to) / 2, max: d.to, invert: false };
+          m.throttle = { index: d.index, button: d.button || undefined, min: d.from, center: (d.from + d.to) / 2, max: d.to, invert: false };
           return null;
         },
       },
@@ -228,8 +244,7 @@ export class GamepadSetup {
         text: 'Flip your ARM switch to ARMED (or hold the button you want to use for arming). Skip to keep the current arm control.',
         optional: true,
         take: (axes, btn) => {
-          const used = [m.roll.index, m.pitch.index, m.yaw.index, m.throttle.index];
-          const s = detectSwitch(base, axes, baseBtn, btn, used);
+          const s = detectSwitch(base, axes, baseBtn, btn, usedAxes(), usedButtons());
           if (!s) return 'Nothing changed. Flip the switch and hold, or Skip.';
           // Axis switch: invert is set so ARMED reads high. A button toggles arming.
           m.arm = s;
@@ -240,8 +255,9 @@ export class GamepadSetup {
         text: 'Move your MODE switch to a different position (or press the button you want for cycling modes). Skip to keep the current mode control.',
         optional: true,
         take: (axes, btn) => {
-          const used = [m.roll.index, m.pitch.index, m.yaw.index, m.throttle.index, ...(m.arm?.kind === 'axis' ? [m.arm.index] : [])];
-          const s = detectSwitch(base, axes, baseBtn, btn, used);
+          const arm = m.arm && m.arm.kind === 'axis' ? [m.arm.index] : [];
+          const armBtn = m.arm && m.arm.kind === 'button' ? [m.arm.index] : [];
+          const s = detectSwitch(base, axes, baseBtn, btn, [...usedAxes(), ...arm], [...usedButtons(), ...armBtn]);
           if (!s) return 'Nothing changed. Move the switch, or Skip.';
           m.mode = { ...s, invert: false };
           return null;

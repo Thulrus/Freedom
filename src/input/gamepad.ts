@@ -16,6 +16,12 @@ export interface AxisMap {
   max: number;
   /** Extra manual flip on top of calibration. */
   invert: boolean;
+  /**
+   * Read an analog button instead of an axis (raw 0..1 scaled to -1..1).
+   * Firefox on Linux treats a radio that reports buttons as a standard
+   * gamepad and turns its Z / Rz axes into the analog triggers (buttons 6/7).
+   */
+  button?: boolean;
 }
 
 /** A switch or button. Axis switches are "on" above +0.5 (after invert). */
@@ -23,6 +29,8 @@ export interface SwitchMap {
   kind: 'axis' | 'button';
   index: number;
   invert: boolean;
+  /** Button that holds a position like an axis (a radio switch arriving as an analog trigger). */
+  analog?: boolean;
 }
 
 export interface GamepadMapping {
@@ -97,6 +105,16 @@ export function normalizeThrottle(raw: number, m: AxisMap): number {
   return v > 0 ? (v < 1 ? v : 1) : 0; // also maps NaN and -0 to 0
 }
 
+/** Raw -1..1 reading of a channel, from its axis or analog button. */
+export function readAnalog(m: { index: number; button?: boolean }, axes: ArrayLike<number>, buttons: ArrayLike<number>): number {
+  return m.button ? (buttons[m.index] ?? 0) * 2 - 1 : (axes[m.index] ?? 0);
+}
+
+/** Switches that hold a position (axes and analog buttons) follow the switch; plain buttons toggle/cycle. */
+export function isHeldSwitch(s: SwitchMap): boolean {
+  return s.kind === 'axis' || !!s.analog;
+}
+
 export function readSwitch(s: SwitchMap, axes: ArrayLike<number>, buttons: ArrayLike<number>): number {
   const v = s.kind === 'axis' ? (axes[s.index] ?? 0) : (buttons[s.index] ?? 0) * 2 - 1;
   return s.invert ? -v : v;
@@ -120,6 +138,28 @@ export function detectAxis(a: ArrayLike<number>, b: ArrayLike<number>): { index:
   return best < 0 ? null : { index: best, from: a[best], to: b[best] };
 }
 
+/** Calibration helper: like detectAxis, falling back to analog buttons (values in -1..1). */
+export function detectAnalog(
+  axesA: ArrayLike<number>,
+  axesB: ArrayLike<number>,
+  btnA: ArrayLike<number>,
+  btnB: ArrayLike<number>,
+): { button: boolean; index: number; from: number; to: number } | null {
+  const d = detectAxis(axesA, axesB);
+  if (d) return { button: false, ...d };
+  let best = -1, bestD = 0.15; // 0.3 of the -1..1 range
+  for (let i = 0; i < Math.min(btnA.length, btnB.length); i++) {
+    const delta = Math.abs(btnB[i] - btnA[i]);
+    if (delta > bestD) {
+      bestD = delta;
+      best = i;
+    }
+  }
+  return best < 0 ? null : { button: true, index: best, from: btnA[best] * 2 - 1, to: btnB[best] * 2 - 1 };
+}
+
+const fractional = (v: number) => v > 0.02 && v < 0.98;
+
 /** Calibration helper: a switch that changed between two snapshots (axes first, then buttons). */
 export function detectSwitch(
   axesA: ArrayLike<number>,
@@ -127,6 +167,7 @@ export function detectSwitch(
   btnA: ArrayLike<number>,
   btnB: ArrayLike<number>,
   ignoreAxes: number[] = [],
+  ignoreButtons: number[] = [],
 ): SwitchMap | null {
   let best = -1, bestD = 0.5;
   for (let i = 0; i < Math.min(axesA.length, axesB.length); i++) {
@@ -139,7 +180,11 @@ export function detectSwitch(
   }
   if (best >= 0) return { kind: 'axis', index: best, invert: axesB[best] < axesA[best] };
   for (let i = 0; i < Math.min(btnA.length, btnB.length); i++) {
-    if (btnB[i] > 0.5 && btnA[i] <= 0.5) return { kind: 'button', index: i, invert: false };
+    if (ignoreButtons.includes(i)) continue;
+    // A part-way value means a radio switch on an analog trigger: read it like an axis.
+    if (fractional(btnA[i]) || fractional(btnB[i])) {
+      if (Math.abs(btnB[i] - btnA[i]) > 0.25) return { kind: 'button', index: i, invert: btnB[i] < btnA[i], analog: true };
+    } else if (btnB[i] > 0.5 && btnA[i] <= 0.5) return { kind: 'button', index: i, invert: false };
   }
   return null;
 }
@@ -192,10 +237,10 @@ export class GamepadInput {
     for (let i = 0; i < this.axisCount; i++) this.axes[i] = pad.axes[i];
     for (let i = 0; i < this.buttonCount; i++) this.buttons[i] = pad.buttons[i].value;
     const m = this.mapping;
-    const r = normalizeStick(this.axes[m.roll.index], m.roll);
-    const p = normalizeStick(this.axes[m.pitch.index], m.pitch);
-    const y = normalizeStick(this.axes[m.yaw.index], m.yaw);
-    const t = normalizeThrottle(this.axes[m.throttle.index], m.throttle);
+    const r = normalizeStick(readAnalog(m.roll, this.axes, this.buttons), m.roll);
+    const p = normalizeStick(readAnalog(m.pitch, this.axes, this.buttons), m.pitch);
+    const y = normalizeStick(readAnalog(m.yaw, this.axes, this.buttons), m.yaw);
+    const t = normalizeThrottle(readAnalog(m.throttle, this.axes, this.buttons), m.throttle);
     this.moved = Math.abs(r - this.roll) + Math.abs(p - this.pitch) + Math.abs(y - this.yaw) + Math.abs(t - this.throttle) > 0.02;
     this.roll = r;
     this.pitch = p;

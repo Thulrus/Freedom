@@ -5,7 +5,7 @@
  */
 import type { FlightMode, QuadState, RcChannels } from '../sim';
 import type { InputSettings, TouchSettings } from '../settings';
-import { defaultMappingFor, GamepadInput, readSwitch, switchPosition, type GamepadMapping } from './gamepad';
+import { defaultMappingFor, GamepadInput, isHeldSwitch, readSwitch, switchPosition, type GamepadMapping } from './gamepad';
 import { KeyboardInput } from './keyboard';
 import { TouchInput } from './touch';
 import { shapeStick, shapeThrottle } from './shaping';
@@ -95,7 +95,7 @@ export class InputManager {
     if (g.moved) this.source = 'gamepad';
     const m = g.mapping;
     if (m.arm) {
-      if (m.arm.kind === 'axis') {
+      if (isHeldSwitch(m.arm)) {
         const on = readSwitch(m.arm, g.axes, g.buttons) > 0.5;
         // Follow the physical switch only when it changes, so keyboard toggles still work.
         if (on !== this.lastArmAxis) this.armSwitch = on;
@@ -103,7 +103,7 @@ export class InputManager {
       } else if (g.pressed(m.arm.index)) this.toggleArm();
     }
     if (m.mode) {
-      if (m.mode.kind === 'axis') {
+      if (isHeldSwitch(m.mode)) {
         const pos = switchPosition(readSwitch(m.mode, g.axes, g.buttons));
         if (pos !== this.lastModePos) this.mode = m.modePositions[pos];
         this.lastModePos = pos;
